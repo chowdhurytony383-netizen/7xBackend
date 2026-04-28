@@ -1,0 +1,21 @@
+import express from 'express';
+import { getContent } from '../controllers/publicContentController.js';
+
+const router = express.Router();
+router.get('/bet-on-games', getContent);
+router.get('/bets/slip', getContent);
+router.get('/bonuses', getContent);
+router.get('/bonuses/welcome', getContent);
+router.get('/bonuses/cashback', getContent);
+router.get('/bonuses/vip', getContent);
+router.get('/games/crash', getContent);
+router.get('/support', getContent);
+router.get('/esports/events', getContent);
+router.get('/casino/live', getContent);
+router.get('/casino/slots', getContent);
+router.get('/other', getContent);
+router.get('/other/promotions', getContent);
+router.get('/other/faq', getContent);
+router.get('/other/rules', getContent);
+router.get('/tournaments', getContent);
+export default router;
