@@ -2,10 +2,17 @@ import Verification from '../models/Verification.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { assertOrThrow } from '../utils/appError.js';
 import { requireEmail, requireString } from '../utils/validation.js';
+import { saveUploadedFile } from '../utils/cloudinary.js';
 
-function fileUrl(req, file) {
+async function saveVerificationDocument(req, file, label) {
   if (!file) return '';
-  return `${req.protocol}://${req.get('host')}/uploads/verification/${file.filename}`;
+  return saveUploadedFile(file, {
+    req,
+    localSubDir: 'verification',
+    cloudinaryFolder: '7xbet/verification',
+    publicIdPrefix: `${req.user?.userId || req.user?._id || 'user'}-${label}`,
+    resourceType: 'auto',
+  });
 }
 
 function extractPayload(req) {
@@ -35,8 +42,8 @@ export const submitVerification = asyncHandler(async (req, res) => {
   const existing = await Verification.findOne({ user: req.user._id });
   assertOrThrow(!existing || existing.status === 'rejected', 'Verification already submitted', 409);
 
-  const documentFront = fileUrl(req, req.files?.documentFront?.[0]);
-  const documentBack = fileUrl(req, req.files?.documentBack?.[0]);
+  const documentFront = await saveVerificationDocument(req, req.files?.documentFront?.[0], 'document-front');
+  const documentBack = await saveVerificationDocument(req, req.files?.documentBack?.[0], 'document-back');
   assertOrThrow(documentFront, 'Document front is required', 400);
 
   const verification = await Verification.findOneAndUpdate(
@@ -66,8 +73,8 @@ export const updateVerification = asyncHandler(async (req, res) => {
   assertOrThrow(existing, 'Verification not found', 404);
   assertOrThrow(existing.status !== 'approved', 'Approved verification cannot be edited', 409);
   const payload = extractPayload(req);
-  const documentFront = fileUrl(req, req.files?.documentFront?.[0]) || existing.documentFront;
-  const documentBack = fileUrl(req, req.files?.documentBack?.[0]) || existing.documentBack;
+  const documentFront = await saveVerificationDocument(req, req.files?.documentFront?.[0], 'document-front') || existing.documentFront;
+  const documentBack = await saveVerificationDocument(req, req.files?.documentBack?.[0], 'document-back') || existing.documentBack;
 
   Object.assign(existing, payload, { documentFront, documentBack, status: 'pending', adminNote: '' });
   await existing.save();

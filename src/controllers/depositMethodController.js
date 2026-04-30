@@ -2,6 +2,7 @@ import DepositMethod from '../models/DepositMethod.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/appError.js';
 import { optionalString, requireNumber, requireString } from '../utils/validation.js';
+import { saveUploadedFile } from '../utils/cloudinary.js';
 
 export const defaultDepositMethods = [
   { key: 'bkash', title: 'bKash', category: 'recommended', minAmount: 100, maxAmount: 25000, displayOrder: 10, isActive: true },
@@ -20,8 +21,15 @@ export async function ensureDefaultDepositMethods() {
   await DepositMethod.insertMany(defaultDepositMethods, { ordered: false });
 }
 
-function makeUploadUrl(req, filename) {
-  return `${req.protocol}://${req.get('host')}/uploads/deposit-methods/${filename}`;
+async function saveMethodImage(req, methodKey) {
+  if (!req.file) return '';
+  return saveUploadedFile(req.file, {
+    req,
+    localSubDir: 'deposit-methods',
+    cloudinaryFolder: '7xbet/deposit-methods',
+    publicIdPrefix: methodKey || req.body?.key || 'deposit-method',
+    resourceType: 'auto',
+  });
 }
 
 function sanitizeMethodKey(value) {
@@ -68,8 +76,9 @@ export const listDepositMethods = asyncHandler(async (_req, res) => {
 
 export const createDepositMethod = asyncHandler(async (req, res) => {
   const payload = payloadFromRequest(req);
-  if (req.file) {
-    payload.image = makeUploadUrl(req, req.file.filename);
+  const imageUrl = await saveMethodImage(req, payload.key);
+  if (imageUrl) {
+    payload.image = imageUrl;
   }
 
   const method = await DepositMethod.create(payload);
@@ -90,8 +99,9 @@ export const updateDepositMethod = asyncHandler(async (req, res) => {
   delete payload.key;
 
   Object.assign(method, payload);
-  if (req.file) {
-    method.image = makeUploadUrl(req, req.file.filename);
+  const imageUrl = await saveMethodImage(req, method.key);
+  if (imageUrl) {
+    method.image = imageUrl;
   }
 
   await method.save();

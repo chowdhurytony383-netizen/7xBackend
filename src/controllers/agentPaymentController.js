@@ -3,6 +3,7 @@ import DepositMethod from '../models/DepositMethod.js';
 import { ensureDefaultDepositMethods } from './depositMethodController.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/appError.js';
+import { saveUploadedFile } from '../utils/cloudinary.js';
 
 function methodToPlain(method) {
   return method?.toObject ? method.toObject() : method;
@@ -63,7 +64,7 @@ function syncAgentPaymentMethods(agent, globalMethods) {
       key: plain.key,
       title: plain.title,
       number: old.number || '',
-      image: '',
+      image: old.image || '',
       note: old.note || '',
       isActive: old.isActive === undefined ? true : Boolean(old.isActive),
       updatedAt: old.updatedAt,
@@ -88,7 +89,7 @@ function publicAgentPaymentPayload(agent, globalMethods, activeOnly = false) {
       return {
         ...plain,
         title: global.title || plain.title,
-        image: global.image || '',
+        image: global.image || plain.image || '',
         category: global.category || 'e-wallets',
         minAmount: global.minAmount || 100,
         maxAmount: global.maxAmount || 25000,
@@ -137,6 +138,18 @@ export const updateMyPaymentMethod = asyncHandler(async (req, res) => {
 
   method.number = String(req.body.number || '').trim();
   method.note = String(req.body.note || '').trim();
+
+  if (req.file) {
+    const imageUrl = await saveUploadedFile(req.file, {
+      req,
+      localSubDir: 'agent-payments',
+      cloudinaryFolder: '7xbet/agent-payments',
+      publicIdPrefix: `${agent.agentId || 'agent'}-${methodKey}`,
+      resourceType: 'auto',
+    });
+    if (imageUrl) method.image = imageUrl;
+  }
+
   method.isActive = req.body.isActive === true || String(req.body.isActive) === 'true';
   method.updatedAt = new Date();
 
