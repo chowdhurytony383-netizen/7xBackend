@@ -9,7 +9,7 @@ import { sanitizeUser } from '../utils/sanitize.js';
 import { sendMail } from '../utils/mailer.js';
 import { env } from '../config/env.js';
 import { createUniqueUserId, generatePassword } from '../utils/identity.js';
-import { normalizeCountry, currencyForCountry } from '../utils/countries.js';
+import { currencyForResolvedCountry, resolveRegistrationCountry } from '../utils/requestCountry.js';
 
 async function createAndSendVerification(user) {
   const token = randomToken(24);
@@ -28,8 +28,8 @@ export const register = asyncHandler(async (req, res) => {
   const confirmPassword = req.body.confirmPassword || req.body.passwordConfirmation || password;
   assertOrThrow(password === confirmPassword, 'Password and confirm password do not match', 400);
 
-  const countryInfo = normalizeCountry(req.body.countryCode || req.body.country || 'BD');
-  const currency = String(req.body.currency || countryInfo.currency || currencyForCountry(countryInfo.code)).toUpperCase();
+  const countryInfo = resolveRegistrationCountry(req);
+  const currency = currencyForResolvedCountry(countryInfo);
   const userId = await createUniqueUserId();
 
   const user = await User.create({
@@ -63,8 +63,8 @@ export const register = asyncHandler(async (req, res) => {
 });
 
 export const oneClickRegister = asyncHandler(async (req, res) => {
-  const countryInfo = normalizeCountry(req.body.countryCode || req.body.country || 'BD');
-  const currency = String(req.body.currency || countryInfo.currency || currencyForCountry(countryInfo.code)).toUpperCase();
+  const countryInfo = resolveRegistrationCountry(req);
+  const currency = currencyForResolvedCountry(countryInfo);
   const referralCode = optionalString(req.body.referralCode, 80) || '';
   const userId = await createUniqueUserId();
   const password = generatePassword(8);
