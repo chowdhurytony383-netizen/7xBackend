@@ -16,20 +16,35 @@ function compactText(value) {
   return cleanText(value).replace(/\s+/g, '');
 }
 
+function stripVariantSuffix(value) {
+  const cleaned = cleanText(value);
+  if (!cleaned) return '';
+
+  // bKash 1, bKash-2, bKash_3, bKash no 4, bKash copy -> bKash
+  const withoutNumberSuffix = cleaned
+    .replace(/\s*(?:no|number|num|serial|sr)?\s*[#:_-]*\s*\d+$/i, '')
+    .replace(/\s*(?:copy|duplicate)$/i, '')
+    .trim();
+
+  // bkash2 -> bkash, nagad03 -> nagad. Keeps names that do not end in digits unchanged.
+  const compact = compactText(withoutNumberSuffix || cleaned);
+  const compactWithoutNumberSuffix = compact.replace(/\d+$/g, '');
+
+  return compactWithoutNumberSuffix || compact;
+}
+
 export function canonicalDepositMethodTitle(methodOrTitle) {
   const method = typeof methodOrTitle === 'object' ? toPlain(methodOrTitle) : { title: methodOrTitle };
-  const title = compactText(method.title);
 
-  if (title) return title;
+  const fromTitle = stripVariantSuffix(method.title);
+  if (fromTitle) return fromTitle;
 
-  return compactText(method.key)
-    .replace(/[-_]+/g, '')
-    .trim();
+  return stripVariantSuffix(method.key) || compactText(method.key) || String(method._id || '');
 }
 
 export function canonicalDepositMethodKey(method) {
   const plain = toPlain(method);
-  return canonicalDepositMethodTitle(plain) || compactText(plain.key) || String(plain._id || '');
+  return canonicalDepositMethodTitle(plain) || stripVariantSuffix(plain.key) || String(plain._id || '');
 }
 
 export function normalizePaymentMethodKey(value) {
