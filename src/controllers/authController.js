@@ -149,6 +149,29 @@ export const updateProfile = asyncHandler(async (req, res) => {
   for (const field of allowed) {
     if (req.body[field] !== undefined) req.user[field] = optionalString(req.body[field], 400) ?? req.body[field];
   }
+
+  if (req.body.email !== undefined) {
+    const emailInput = optionalString(req.body.email, 254) || '';
+
+    if (emailInput) {
+      const nextEmail = requireEmail(emailInput);
+
+      if (nextEmail !== req.user.email) {
+        const existingUser = await User.findOne({
+          _id: { $ne: req.user._id },
+          email: nextEmail,
+        });
+
+        assertOrThrow(!existingUser, 'Email address already exists', 409);
+
+        req.user.email = nextEmail;
+        req.user.isVerified = false;
+        req.user.emailVerificationToken = '';
+        req.user.emailVerificationExpires = undefined;
+      }
+    }
+  }
+
   if (req.body.dateOfBirth) req.user.dateOfBirth = new Date(req.body.dateOfBirth);
   await req.user.save();
   res.json({ success: true, message: 'Profile updated', data: sanitizeUser(req.user) });
