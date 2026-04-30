@@ -26,6 +26,7 @@ import adminAgentPaymentRoutes from './routes/adminAgentPaymentRoutes.js';
 import agentPaymentRoutes from './routes/agentPaymentRoutes.js';
 import agentRequestRoutes from './routes/agentRequestRoutes.js';
 import adminAgentRequestRoutes from './routes/adminAgentRequestRoutes.js';
+import depositMethodRoutes from './routes/depositMethodRoutes.js';
 
 configurePassport();
 
@@ -60,6 +61,7 @@ app.use('/api/razorpay', razorpayRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin', adminAgentPaymentRoutes);
 app.use('/api/admin', adminAgentRequestRoutes);
+app.use('/api/admin', depositMethodRoutes);
 app.use('/api/sports', sportsRoutes);
 app.use('/api/auth', oauthRoutes);
 app.use('/api', publicContentRoutes);
