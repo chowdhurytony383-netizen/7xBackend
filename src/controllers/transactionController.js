@@ -3,8 +3,10 @@ import Razorpay from 'razorpay';
 import Transaction from '../models/Transaction.js';
 import Agent from '../models/Agent.js';
 import AgentPaymentRequest from '../models/AgentPaymentRequest.js';
+import DepositMethod from '../models/DepositMethod.js';
+import { ensureDefaultDepositMethods } from './depositMethodController.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { AppError, assertOrThrow } from '../utils/appError.js';
+import { assertOrThrow } from '../utils/appError.js';
 import { requireNumber, optionalString, requireString } from '../utils/validation.js';
 import { creditWallet, debitWallet } from '../utils/wallet.js';
 import { env } from '../config/env.js';
@@ -99,16 +101,37 @@ export const verifyDepositPayment = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Deposit verified', data: transaction });
 });
 
+async function getGlobalDepositMethods(activeOnly = true) {
+  await ensureDefaultDepositMethods();
+  const filter = activeOnly ? { isActive: true } : {};
+  return DepositMethod.find(filter).sort({ displayOrder: 1, createdAt: 1 });
+}
 
-function normalizeAgentPaymentMethods(agent) {
-  const defaults = [
-    { key: 'bkash', title: 'bKash Agent', number: '', image: '', note: '', isActive: true },
-    { key: 'nagad', title: 'Nagad Agent', number: '', image: '', note: '', isActive: true },
-    { key: 'rocket', title: 'Rocket Agent', number: '', image: '', note: '', isActive: false },
-  ];
+function normalizeAgentPaymentMethods(agent, globalMethods) {
+  const existing = new Map(
+    (agent.paymentMethods || []).map((method) => {
+      const plain = method.toObject ? method.toObject() : method;
+      return [plain.key, plain];
+    })
+  );
 
-  const existing = new Map((agent.paymentMethods || []).map((method) => [method.key, method.toObject ? method.toObject() : method]));
-  return defaults.map((method) => ({ ...method, ...(existing.get(method.key) || {}) }));
+  return globalMethods.map((method) => {
+    const plainMethod = method.toObject ? method.toObject() : method;
+    const saved = existing.get(plainMethod.key) || {};
+
+    return {
+      key: plainMethod.key,
+      title: plainMethod.title,
+      category: plainMethod.category || 'e-wallets',
+      image: plainMethod.image || '',
+      number: saved.number || '',
+      note: saved.note || '',
+      isActive: saved.isActive === undefined ? true : Boolean(saved.isActive),
+      minAmount: plainMethod.minAmount || 100,
+      maxAmount: plainMethod.maxAmount || 25000,
+      displayOrder: plainMethod.displayOrder || 100,
+    };
+  });
 }
 
 function buildUserDisplay(user) {
@@ -116,24 +139,41 @@ function buildUserDisplay(user) {
 }
 
 export const getAgentDepositOptions = asyncHandler(async (_req, res) => {
-  const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(100);
+  const globalMethods = await getGlobalDepositMethods(true);
+  const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(200);
 
   const options = [];
 
-  for (const agent of agents) {
-    const methods = normalizeAgentPaymentMethods(agent).filter((method) => method.isActive);
-    for (const method of methods) {
-      options.push({
-        id: `${agent.agentId}:${method.key}`,
-        agentId: agent.agentId,
-        agentName: agent.name,
-        methodKey: method.key,
-        methodTitle: method.title,
-        number: method.number,
-        image: method.image,
-        note: method.note,
-      });
+  for (const method of globalMethods) {
+    let selectedAgent = null;
+    let selectedPayment = null;
+
+    for (const agent of agents) {
+      const methods = normalizeAgentPaymentMethods(agent, globalMethods);
+      const candidate = methods.find((item) => item.key === method.key && item.isActive && item.number);
+      if (candidate) {
+        selectedAgent = agent;
+        selectedPayment = candidate;
+        break;
+      }
     }
+
+    if (!selectedAgent || !selectedPayment) continue;
+
+    options.push({
+      id: `${selectedAgent.agentId}:${method.key}`,
+      agentId: selectedAgent.agentId,
+      agentName: selectedAgent.name,
+      methodKey: method.key,
+      methodTitle: method.title,
+      category: method.category,
+      image: method.image,
+      number: selectedPayment.number,
+      note: selectedPayment.note,
+      minAmount: method.minAmount || 100,
+      maxAmount: method.maxAmount || 25000,
+      displayOrder: method.displayOrder || 100,
+    });
   }
 
   res.json({ success: true, data: options, options });
@@ -142,14 +182,28 @@ export const getAgentDepositOptions = asyncHandler(async (_req, res) => {
 export const createAgentDepositRequest = asyncHandler(async (req, res) => {
   const amount = requireNumber(req.body.amount, 'Amount', 1, 1_000_000);
   const agentId = requireString(req.body.agentId, 'Agent ID', 3, 40).toUpperCase();
-  const methodKey = requireString(req.body.methodKey, 'Payment method', 2, 30).toLowerCase();
-  const userNote = optionalString(req.body.note, 500) || '';
+  const methodKey = requireString(req.body.methodKey, 'Payment method', 2, 50).toLowerCase();
+  const payerNumber = optionalString(req.body.payerNumber, 80) || '';
+  const transactionRef = optionalString(req.body.transactionRef, 120) || '';
+  const extraNote = optionalString(req.body.note, 500) || '';
+
+  const globalMethods = await getGlobalDepositMethods(true);
+  const globalMethod = globalMethods.find((item) => item.key === methodKey);
+  assertOrThrow(globalMethod, 'Payment method is not active', 404);
+  assertOrThrow(amount >= Number(globalMethod.minAmount || 1), `Minimum amount is ${globalMethod.minAmount}`, 400);
+  assertOrThrow(amount <= Number(globalMethod.maxAmount || 1_000_000), `Maximum amount is ${globalMethod.maxAmount}`, 400);
 
   const agent = await Agent.findOne({ agentId, status: 'active' });
   assertOrThrow(agent, 'Agent not found or inactive', 404);
 
-  const method = normalizeAgentPaymentMethods(agent).find((item) => item.key === methodKey && item.isActive);
-  assertOrThrow(method, 'Payment method is not active', 404);
+  const method = normalizeAgentPaymentMethods(agent, globalMethods).find((item) => item.key === methodKey && item.isActive && item.number);
+  assertOrThrow(method, 'Agent payment number is not active', 404);
+
+  const userNoteParts = [];
+  if (payerNumber) userNoteParts.push(`Sender wallet number: ${payerNumber}`);
+  if (transactionRef) userNoteParts.push(`Transaction ID: ${transactionRef}`);
+  if (extraNote) userNoteParts.push(`Note: ${extraNote}`);
+  const userNote = userNoteParts.join('\n');
 
   const transaction = await Transaction.create({
     user: req.user._id,
@@ -162,7 +216,15 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
     methodKey: method.key,
     userNote,
     gatewayPayload: {
-      paymentMethod: method,
+      paymentMethod: {
+        key: method.key,
+        title: globalMethod.title,
+        number: method.number,
+        note: method.note,
+        image: globalMethod.image,
+      },
+      payerNumber,
+      transactionRef,
       source: 'agent-panel',
     },
   });
@@ -177,9 +239,11 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
     agentId: agent.agentId,
     amount,
     methodKey: method.key,
-    methodTitle: method.title,
+    methodTitle: globalMethod.title,
     methodNumber: method.number,
     userNote,
+    payerNumber,
+    transactionRef,
     transaction: transaction._id,
   });
 
@@ -196,7 +260,7 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
 export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
   const amount = requireNumber(req.body.amount, 'Amount', 1, 1_000_000);
   const agentId = optionalString(req.body.agentId, 40)?.toUpperCase();
-  const methodKey = optionalString(req.body.methodKey, 30)?.toLowerCase() || optionalString(req.body.method, 30)?.toLowerCase() || 'manual';
+  const methodKey = optionalString(req.body.methodKey, 50)?.toLowerCase() || optionalString(req.body.method, 50)?.toLowerCase() || 'manual';
   const userNote = optionalString(req.body.note, 500) || optionalString(req.body.accountNumber, 160) || '';
 
   assertOrThrow((req.user.wallet || 0) >= amount, 'Insufficient wallet balance', 400);
@@ -209,7 +273,8 @@ export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
   }
   assertOrThrow(agent, 'No active agent available for withdrawal', 404);
 
-  const method = normalizeAgentPaymentMethods(agent).find((item) => item.key === methodKey) || {
+  const globalMethods = await getGlobalDepositMethods(false);
+  const method = normalizeAgentPaymentMethods(agent, globalMethods).find((item) => item.key === methodKey) || {
     key: methodKey,
     title: methodKey === 'manual' ? 'Manual Withdraw' : methodKey,
     number: '',
@@ -259,7 +324,6 @@ export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
     data: { request, transaction },
   });
 });
-
 
 export const requestRazorpayPayout = asyncHandler(async (req, res) => {
   const transactionId = requireString(req.body.transactionId, 'Transaction ID', 6, 80);
