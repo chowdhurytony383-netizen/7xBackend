@@ -10,6 +10,7 @@ import { assertOrThrow } from '../utils/appError.js';
 import { requireNumber, optionalString, requireString } from '../utils/validation.js';
 import { creditWallet, debitWallet } from '../utils/wallet.js';
 import { env } from '../config/env.js';
+import { groupDepositMethodsByTitle, pickPrimaryDepositMethod } from '../utils/paymentMethodCanonical.js';
 
 function razorpayClient() {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) return null;
@@ -174,52 +175,64 @@ function pickRandomItem(items) {
 
 export const getAgentDepositOptions = asyncHandler(async (_req, res) => {
   const globalMethods = await getGlobalDepositMethods(true);
+  const methodGroups = groupDepositMethodsByTitle(globalMethods);
   const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(500);
 
   const options = [];
 
-  for (const method of globalMethods) {
+  for (const group of methodGroups) {
+    const primaryMethod = pickPrimaryDepositMethod(group.methods);
+    if (!primaryMethod) continue;
+
     const eligibleOptions = [];
 
-    for (const agent of agents) {
-      if (!isPaymentMethodAssignedToAgent(agent, method.key, globalMethods)) continue;
+    for (const method of group.methods) {
+      for (const agent of agents) {
+        if (!isPaymentMethodAssignedToAgent(agent, method.key, globalMethods)) continue;
 
-      const methods = normalizeAgentPaymentMethods(agent, globalMethods);
-      const payment = methods.find((item) => item.key === method.key && item.isActive && item.number);
+        const methods = normalizeAgentPaymentMethods(agent, globalMethods);
+        const payment = methods.find((item) => item.key === method.key && item.isActive && item.number);
 
-      if (!payment) continue;
+        if (!payment) continue;
 
-      eligibleOptions.push({
-        agent,
-        payment,
-      });
+        eligibleOptions.push({
+          agent,
+          payment,
+          globalMethod: method,
+        });
+      }
     }
 
     const selected = pickRandomItem(eligibleOptions);
     if (!selected) continue;
 
-    const { agent: selectedAgent, payment: selectedPayment } = selected;
+    const { agent: selectedAgent, payment: selectedPayment, globalMethod: selectedGlobalMethod } = selected;
 
     options.push({
-      id: `${selectedAgent.agentId}:${method.key}`,
+      id: group.canonicalKey,
+      groupKey: group.canonicalKey,
       agentId: selectedAgent.agentId,
       agentName: selectedAgent.name,
-      methodKey: method.key,
-      methodTitle: method.title,
-      category: method.category,
-      image: method.image,
+      methodKey: selectedPayment.key,
+      selectedMethodKey: selectedPayment.key,
+      methodTitle: primaryMethod.title || selectedGlobalMethod.title,
+      category: primaryMethod.category || selectedGlobalMethod.category || 'e-wallets',
+      image: primaryMethod.image || selectedGlobalMethod.image || '',
       number: selectedPayment.number,
       note: selectedPayment.note,
-      minAmount: method.minAmount || 100,
-      maxAmount: method.maxAmount || 25000,
-      displayOrder: method.displayOrder || 100,
+      minAmount: primaryMethod.minAmount || selectedGlobalMethod.minAmount || 100,
+      maxAmount: primaryMethod.maxAmount || selectedGlobalMethod.maxAmount || 25000,
+      displayOrder: primaryMethod.displayOrder || selectedGlobalMethod.displayOrder || 100,
       availableAgentCount: eligibleOptions.length,
+      duplicateMethodCount: group.methods.length,
+      duplicateKeys: group.duplicateKeys || [],
       selectionMode: 'random-agent',
     });
   }
 
   res.json({ success: true, data: options, options });
 });
+
 
 export const createAgentDepositRequest = asyncHandler(async (req, res) => {
   const amount = requireNumber(req.body.amount, 'Amount', 1, 1_000_000);
