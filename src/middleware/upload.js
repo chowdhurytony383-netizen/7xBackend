@@ -1,18 +1,4 @@
-import fs from 'fs';
-import path from 'path';
 import multer from 'multer';
-import { nanoid } from 'nanoid';
-
-const uploadDir = path.resolve('uploads/verification');
-fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    cb(null, `${Date.now()}-${nanoid(10)}${ext}`);
-  },
-});
 
 function fileFilter(_req, file, cb) {
   const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
@@ -21,7 +7,7 @@ function fileFilter(_req, file, cb) {
 }
 
 export const verificationUpload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter,
   limits: { fileSize: 6 * 1024 * 1024 },
 }).fields([
