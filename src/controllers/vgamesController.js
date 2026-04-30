@@ -4,6 +4,23 @@ import Game from '../models/Game.js';
 import Bet from '../models/Bet.js';
 import { env } from '../config/env.js';
 
+const SLOT_SYMBOLS = ['Symbol_1', 'Symbol_2', 'Symbol_3', 'Symbol_4', 'Symbol_5', 'Symbol_6'];
+const SLOT_COUNT = 15;
+const DEFAULT_ICON_DATA = [
+  'Symbol_2', 'Symbol_1', 'Symbol_3',
+  'Symbol_4', 'Symbol_6', 'Symbol_5',
+  'Symbol_1', 'Symbol_3', 'Symbol_2',
+  'Symbol_5', 'Symbol_4', 'Symbol_6',
+  'Symbol_3', 'Symbol_2', 'Symbol_1',
+];
+
+const BET_SIZE_LIST = [
+  '0.4', '0.8', '1.2', '1.6', '2', '2.4', '2.8', '3.2', '3.6', '4',
+  '5', '10', '15', '20', '25', '30', '35', '40', '45', '50',
+  '100', '150', '200', '250', '300', '350', '400', '450', '500',
+  '600', '800', '1000', '1200', '1400', '1600', '1800', '2000',
+];
+
 function decodeGameToken(token) {
   try {
     return jwt.verify(token, env.JWT_ACCESS_SECRET);
@@ -17,10 +34,28 @@ function numberValue(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function randomSymbol() {
+  return SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)];
+}
+
+function randomSlotIcons() {
+  return Array.from({ length: SLOT_COUNT }, randomSymbol);
+}
+
+function winSlotIcons() {
+  const slots = randomSlotIcons();
+
+  // The Fortune Tiger Construct game uses 15 visible slots. Active positions are 1-based.
+  // These positions show a simple left-to-right winning row without causing slot count mismatch.
+  slots[0] = 'Symbol_4';
+  slots[3] = 'Symbol_4';
+  slots[6] = 'Symbol_4';
+
+  return slots;
+}
+
 function slotIcons(isWin) {
-  if (isWin) return ['Symbol_4', 'Symbol_4', 'Symbol_4', 'Symbol_1', 'Symbol_2', 'Symbol_3', 'Symbol_5', 'Symbol_6', 'Symbol_2'];
-  const symbols = ['Symbol_1', 'Symbol_2', 'Symbol_3', 'Symbol_4', 'Symbol_5', 'Symbol_6'];
-  return Array.from({ length: 9 }, () => symbols[Math.floor(Math.random() * symbols.length)]);
+  return isWin ? winSlotIcons() : randomSlotIcons();
 }
 
 function sessionPayload(user, token) {
@@ -33,7 +68,7 @@ function sessionPayload(user, token) {
       credit: Number(user.wallet || 0),
       num_line: 5,
       line_num: 5,
-      bet_amount: 0.2,
+      bet_amount: 0.4,
       free_num: 0,
       free_total: -1,
       free_amount: 4,
@@ -44,12 +79,16 @@ function sessionPayload(user, token) {
       buy_max: 1300,
       total_way: 27,
       multiply: 0,
+      multipy: 0,
       previous_session: false,
       game_state: '',
-      bet_size_list: ['0.2', '2', '20', '100'],
+      bet_size_list: BET_SIZE_LIST,
       currency_prefix: user.currency || 'BDT',
       currency_suffix: '',
-      icon_data: ['Symbol_2', 'Symbol_1', 'Symbol_3', 'Symbol_4', 'Symbol_6', 'Symbol_5', 'Symbol_4', 'Symbol_4', 'Symbol_4'],
+      currency_thousand: ',',
+      currency_decimal: '.',
+      icon_data: DEFAULT_ICON_DATA,
+      active_icons: [],
       active_lines: [],
       drop_line: [],
       multiple_list: [],
@@ -63,19 +102,35 @@ function iconsPayload() {
   return {
     success: true,
     data: {
+      Symbol_0: 'Symbol_0',
       Symbol_1: 'Symbol_1',
       Symbol_2: 'Symbol_2',
       Symbol_3: 'Symbol_3',
       Symbol_4: 'Symbol_4',
       Symbol_5: 'Symbol_5',
       Symbol_6: 'Symbol_6',
-      Scatter: 'Scatter',
-      Wild: 'Wild',
+      Scatter: 'scatter',
+      Wild: 'wild',
+      scatter: 'scatter',
+      wild: 'wild',
     },
   };
 }
 
-function spinPayload({ finalWallet, betAmount, winAmount, isWin }) {
+function spinPayload({ finalWallet, betAmount, betAmountRaw, cpl, winAmount, isWin }) {
+  const icons = slotIcons(isWin);
+  const activeIcons = isWin ? [1, 4, 7] : [];
+  const activeLines = isWin ? [{
+    name: 'Symbol_4',
+    index: 1,
+    payout: 10,
+    combine: 3,
+    way_243: 1,
+    multiply: 0,
+    win_amount: winAmount,
+    active_icon: activeIcons,
+  }] : [];
+
   return {
     success: true,
     message: 'Spin success',
@@ -87,9 +142,15 @@ function spinPayload({ finalWallet, betAmount, winAmount, isWin }) {
       free_num: 0,
       scaler: 0,
       num_line: 5,
-      cpl: 1,
-      betamount: betAmount,
-      bet_amount: betAmount,
+      line_num: 5,
+      cpl,
+      credit_line: cpl,
+      betamount: betAmountRaw,
+      bet_amount: betAmountRaw,
+      total_bet: betAmount,
+      win_amount: winAmount,
+      profit: winAmount - betAmount,
+      balance: Number(finalWallet || 0),
       pull: {
         TotalWay: 27,
         FreeSpin: 0,
@@ -102,22 +163,13 @@ function spinPayload({ finalWallet, betAmount, winAmount, isWin }) {
         MultipyScatter: 0,
         MultiplyCount: 2,
         WinLogs: isWin ? ['[WIN] 7XBET backend generated win'] : ['[LOSE] No winning line'],
-        DropLine: 3,
+        DropLine: 0,
         MultipleList: [],
         WinAmount: winAmount,
         WinOnDrop: winAmount,
-        SlotIcons: slotIcons(isWin),
-        ActiveIcons: isWin ? [0, 1, 2] : [],
-        ActiveLines: isWin ? [{
-          name: 'Symbol_4',
-          index: 3,
-          payout: 10,
-          combine: 3,
-          way_243: 1,
-          multiply: 0,
-          win_amount: winAmount,
-          active_icon: [0, 1, 2],
-        }] : [],
+        SlotIcons: icons,
+        ActiveIcons: activeIcons,
+        ActiveLines: activeLines,
         DropLineData: [],
       },
     },
@@ -126,9 +178,9 @@ function spinPayload({ finalWallet, betAmount, winAmount, isWin }) {
 
 async function handleSpin(req, res, user, game) {
   const merged = { ...req.query, ...req.body };
-  const cpl = numberValue(merged.cpl, 1);
-  const betAmountRaw = numberValue(merged.betamount || merged.bet_amount, 0.2);
-  const numLine = numberValue(merged.numline || merged.num_line, 5);
+  const cpl = Math.max(numberValue(merged.cpl, 1), 1);
+  const betAmountRaw = Math.max(numberValue(merged.betamount || merged.bet_amount, 0.4), 0.4);
+  const numLine = Math.max(numberValue(merged.numline || merged.num_line, 5), 1);
   const betAmount = Number((cpl * betAmountRaw * numLine).toFixed(2));
 
   if (!betAmount || betAmount <= 0) {
@@ -166,10 +218,11 @@ async function handleSpin(req, res, user, game) {
       cpl,
       betamount: betAmountRaw,
       numLine,
+      slotCount: SLOT_COUNT,
     },
   });
 
-  return res.json(spinPayload({ finalWallet: finalUser.wallet, betAmount, winAmount, isWin }));
+  return res.json(spinPayload({ finalWallet: finalUser.wallet, betAmount, betAmountRaw, cpl, winAmount, isWin }));
 }
 
 export async function handleVGameAction(req, res) {
@@ -196,7 +249,35 @@ export async function handleVGameAction(req, res) {
   if (action === 'session') return res.json(sessionPayload(user, token));
   if (action === 'icons') return res.json(iconsPayload());
   if (action === 'spin') return handleSpin(req, res, user, game);
+  if (action === 'buy') return handleSpin(req, res, user, game);
   if (action === 'freenum') return res.json({ success: true, data: { free_num: 3 } });
+  if (action === 'logs' || action === 'histories') {
+    return res.json({
+      success: true,
+      data: {
+        totalRecord: 0,
+        perPage: 10,
+        currentPage: 1,
+        displayTotal: 0,
+        totalPage: 1,
+        totalBet: 0,
+        totalProfit: 0,
+        items: [],
+      },
+    });
+  }
+  if (action === 'history_detail') {
+    return res.json({
+      success: true,
+      data: {
+        spin_date: '',
+        spin_hour: '',
+        result_data: [],
+      },
+    });
+  }
+  if (action === 'save') return res.json({ success: true, data: { saved: true } });
+  if (action === 'change_free') return res.json({ success: true, data: { free_num: 0 } });
 
   return res.status(404).json({ success: false, message: `Unsupported action: ${action}` });
 }
