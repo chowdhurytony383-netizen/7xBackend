@@ -3,7 +3,6 @@ import DepositMethod from '../models/DepositMethod.js';
 import { ensureDefaultDepositMethods } from './depositMethodController.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/appError.js';
-import { dedupeDepositMethodsByTitle } from '../utils/paymentMethodCanonical.js';
 
 function methodToPlain(method) {
   return method?.toObject ? method.toObject() : method;
@@ -13,8 +12,7 @@ async function getGlobalDepositMethods(activeOnly = false) {
   await ensureDefaultDepositMethods();
 
   const filter = activeOnly ? { isActive: true } : {};
-  const methods = await DepositMethod.find(filter).sort({ displayOrder: 1, createdAt: 1 });
-  return dedupeDepositMethodsByTitle(methods);
+  return DepositMethod.find(filter).sort({ displayOrder: 1, createdAt: 1 });
 }
 
 function getRawAgent(agent) {

@@ -1,5 +1,4 @@
 import DepositMethod from '../models/DepositMethod.js';
-import { dedupeDepositMethodsByTitle, findDuplicateDepositMethod } from '../utils/paymentMethodCanonical.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/appError.js';
 import { optionalString, requireNumber, requireString } from '../utils/validation.js';
@@ -64,19 +63,11 @@ function payloadFromRequest(req, existing = {}) {
 export const listDepositMethods = asyncHandler(async (_req, res) => {
   await ensureDefaultDepositMethods();
   const methods = await DepositMethod.find().sort({ displayOrder: 1, createdAt: 1 });
-  const uniqueMethods = dedupeDepositMethodsByTitle(methods);
-  res.json({ success: true, data: uniqueMethods, methods: uniqueMethods });
+  res.json({ success: true, data: methods, methods });
 });
 
 export const createDepositMethod = asyncHandler(async (req, res) => {
   const payload = payloadFromRequest(req);
-  const existingMethods = await DepositMethod.find().sort({ displayOrder: 1, createdAt: 1 });
-  const duplicate = findDuplicateDepositMethod(existingMethods, payload);
-
-  if (duplicate) {
-    throw new AppError(`Payment method already exists as ${duplicate.title}. Update the existing method instead of creating another ${payload.title}.`, 409);
-  }
-
   if (req.file) {
     payload.image = makeUploadUrl(req, req.file.filename);
   }
@@ -97,13 +88,6 @@ export const updateDepositMethod = asyncHandler(async (req, res) => {
 
   const payload = payloadFromRequest(req, method);
   delete payload.key;
-
-  const existingMethods = await DepositMethod.find().sort({ displayOrder: 1, createdAt: 1 });
-  const duplicate = findDuplicateDepositMethod(existingMethods, payload, method.key);
-
-  if (duplicate) {
-    throw new AppError(`Another payment method already uses the name ${duplicate.title}. Keep each payment method name unique.`, 409);
-  }
 
   Object.assign(method, payload);
   if (req.file) {
