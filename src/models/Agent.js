@@ -1,6 +1,16 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
+function normalizeMethodKeys(keys) {
+  if (!Array.isArray(keys)) return keys;
+
+  return [...new Set(
+    keys
+      .map((key) => String(key || '').trim().toLowerCase())
+      .filter(Boolean)
+  )];
+}
+
 const agentSchema = new mongoose.Schema({
   agentId: {
     type: String,
@@ -30,6 +40,14 @@ const agentSchema = new mongoose.Schema({
     enum: ['active', 'blocked'],
     default: 'active',
     index: true,
+  },
+  // Main Admin controls this list.
+  // undefined = backward-compatible old agents can use all active methods.
+  // [] = this agent has no assigned payment methods.
+  allowedPaymentMethodKeys: {
+    type: [String],
+    default: undefined,
+    set: normalizeMethodKeys,
   },
   paymentMethods: {
     type: [
