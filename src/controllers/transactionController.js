@@ -134,6 +134,35 @@ function normalizeAgentPaymentMethods(agent, globalMethods) {
   });
 }
 
+function getRawAgent(agent) {
+  return agent?.toObject ? agent.toObject() : (agent || {});
+}
+
+function normalizeKeyList(keys) {
+  if (!Array.isArray(keys)) return [];
+
+  return [...new Set(
+    keys
+      .map((key) => String(key || '').trim().toLowerCase())
+      .filter(Boolean)
+  )];
+}
+
+function getAllowedPaymentMethodKeys(agent, globalMethods) {
+  const rawAgent = getRawAgent(agent);
+  const globalKeys = globalMethods.map((method) => String(method.key || '').toLowerCase()).filter(Boolean);
+  const globalKeySet = new Set(globalKeys);
+
+  // Old agents without this field keep the previous behavior: all methods are allowed.
+  if (!Array.isArray(rawAgent.allowedPaymentMethodKeys)) return globalKeys;
+
+  return normalizeKeyList(rawAgent.allowedPaymentMethodKeys).filter((key) => globalKeySet.has(key));
+}
+
+function isPaymentMethodAssignedToAgent(agent, methodKey, globalMethods) {
+  return getAllowedPaymentMethodKeys(agent, globalMethods).includes(String(methodKey || '').toLowerCase());
+}
+
 function buildUserDisplay(user) {
   return user?.fullName || user?.name || user?.username || user?.email || user?.userId || 'User';
 }
@@ -153,6 +182,8 @@ export const getAgentDepositOptions = asyncHandler(async (_req, res) => {
     const eligibleOptions = [];
 
     for (const agent of agents) {
+      if (!isPaymentMethodAssignedToAgent(agent, method.key, globalMethods)) continue;
+
       const methods = normalizeAgentPaymentMethods(agent, globalMethods);
       const payment = methods.find((item) => item.key === method.key && item.isActive && item.number);
 
@@ -206,6 +237,11 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
 
   const agent = await Agent.findOne({ agentId, status: 'active' });
   assertOrThrow(agent, 'Agent not found or inactive', 404);
+  assertOrThrow(
+    isPaymentMethodAssignedToAgent(agent, methodKey, globalMethods),
+    'This payment method is not assigned to the selected agent',
+    403
+  );
 
   const method = normalizeAgentPaymentMethods(agent, globalMethods).find((item) => item.key === methodKey && item.isActive && item.number);
   assertOrThrow(method, 'Agent payment number is not active', 404);

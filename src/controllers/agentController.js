@@ -10,6 +10,16 @@ function sanitizeAgent(agent) {
   return typeof agent?.toSafeObject === 'function' ? agent.toSafeObject() : agent;
 }
 
+function normalizeMethodKeys(keys) {
+  if (!Array.isArray(keys)) return [];
+
+  return [...new Set(
+    keys
+      .map((key) => String(key || '').trim().toLowerCase())
+      .filter(Boolean)
+  )];
+}
+
 export const createAgent = asyncHandler(async (req, res) => {
   const name = optionalString(req.body.name, 120) || 'Agent';
   const agentId = optionalString(req.body.agentId, 40)?.toUpperCase() || await createUniqueAgentId();
@@ -22,6 +32,8 @@ export const createAgent = asyncHandler(async (req, res) => {
     createdBy: req.user?._id,
     status: 'active',
     balance: 0,
+    // New agents start with no payment method access until Main Admin assigns methods.
+    allowedPaymentMethodKeys: normalizeMethodKeys(req.body.allowedPaymentMethodKeys),
     adminNote: optionalString(req.body.note, 500) || '',
   });
 
