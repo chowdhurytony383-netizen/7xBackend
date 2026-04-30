@@ -138,27 +138,36 @@ function buildUserDisplay(user) {
   return user?.fullName || user?.name || user?.username || user?.email || user?.userId || 'User';
 }
 
+function pickRandomItem(items) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return items[crypto.randomInt(items.length)];
+}
+
 export const getAgentDepositOptions = asyncHandler(async (_req, res) => {
   const globalMethods = await getGlobalDepositMethods(true);
-  const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(200);
+  const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(500);
 
   const options = [];
 
   for (const method of globalMethods) {
-    let selectedAgent = null;
-    let selectedPayment = null;
+    const eligibleOptions = [];
 
     for (const agent of agents) {
       const methods = normalizeAgentPaymentMethods(agent, globalMethods);
-      const candidate = methods.find((item) => item.key === method.key && item.isActive && item.number);
-      if (candidate) {
-        selectedAgent = agent;
-        selectedPayment = candidate;
-        break;
-      }
+      const payment = methods.find((item) => item.key === method.key && item.isActive && item.number);
+
+      if (!payment) continue;
+
+      eligibleOptions.push({
+        agent,
+        payment,
+      });
     }
 
-    if (!selectedAgent || !selectedPayment) continue;
+    const selected = pickRandomItem(eligibleOptions);
+    if (!selected) continue;
+
+    const { agent: selectedAgent, payment: selectedPayment } = selected;
 
     options.push({
       id: `${selectedAgent.agentId}:${method.key}`,
@@ -173,6 +182,8 @@ export const getAgentDepositOptions = asyncHandler(async (_req, res) => {
       minAmount: method.minAmount || 100,
       maxAmount: method.maxAmount || 25000,
       displayOrder: method.displayOrder || 100,
+      availableAgentCount: eligibleOptions.length,
+      selectionMode: 'random-agent',
     });
   }
 
