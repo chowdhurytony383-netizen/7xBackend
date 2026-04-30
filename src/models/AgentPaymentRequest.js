@@ -61,6 +61,14 @@ const agentPaymentRequestSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  payerNumber: {
+    type: String,
+    default: '',
+  },
+  transactionRef: {
+    type: String,
+    default: '',
+  },
   agentNote: {
     type: String,
     default: '',

@@ -36,8 +36,9 @@ const agentSchema = new mongoose.Schema({
       {
         key: {
           type: String,
-          enum: ['bkash', 'nagad', 'rocket'],
           required: true,
+          trim: true,
+          lowercase: true,
         },
         title: {
           type: String,
