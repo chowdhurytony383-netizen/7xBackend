@@ -10,6 +10,7 @@ import { sendMail } from '../utils/mailer.js';
 import { env } from '../config/env.js';
 import { createUniqueUserId, generatePassword } from '../utils/identity.js';
 import { currencyForResolvedCountry, resolveRegistrationCountry } from '../utils/requestCountry.js';
+import { saveUploadedFile } from '../utils/cloudinary.js';
 
 async function createAndSendVerification(user) {
   const token = randomToken(24);
@@ -175,6 +176,37 @@ export const updateProfile = asyncHandler(async (req, res) => {
   if (req.body.dateOfBirth) req.user.dateOfBirth = new Date(req.body.dateOfBirth);
   await req.user.save();
   res.json({ success: true, message: 'Profile updated', data: sanitizeUser(req.user) });
+});
+
+
+export const updateProfilePicture = asyncHandler(async (req, res) => {
+  const file = req.file
+    || req.files?.picture?.[0]
+    || req.files?.profilePicture?.[0]
+    || req.files?.avatar?.[0];
+
+  assertOrThrow(file, 'Profile picture file is required', 400);
+
+  const pictureUrl = await saveUploadedFile(file, {
+    req,
+    localSubDir: 'profile-pictures',
+    cloudinaryFolder: '7xbet/profile-pictures',
+    publicIdPrefix: `profile-${req.user.userId || req.user._id}`,
+    resourceType: 'image',
+  });
+
+  assertOrThrow(pictureUrl, 'Profile picture upload failed', 500);
+
+  req.user.picture = pictureUrl;
+  await req.user.save();
+
+  res.json({
+    success: true,
+    message: 'Profile picture updated',
+    data: sanitizeUser(req.user),
+    user: sanitizeUser(req.user),
+    picture: pictureUrl,
+  });
 });
 
 export const verifyEmail = asyncHandler(async (req, res) => {
