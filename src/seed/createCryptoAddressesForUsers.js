@@ -6,7 +6,7 @@ import { ensureUserCryptoAddresses, syncDefaultCryptoMethods } from '../services
 
 function shortError(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
-  return text.length > 160 ? `${text.slice(0, 160)}...` : text;
+  return text.length > 220 ? `${text.slice(0, 220)}...` : text;
 }
 
 async function main() {
