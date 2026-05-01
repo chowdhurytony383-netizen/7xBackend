@@ -14,6 +14,7 @@ const cryptoMethodSchema = new mongoose.Schema({
   confirmations: { type: Number, default: 1, min: 0 },
   xpubEnvKey: { type: String, default: '' },
   addressFamily: { type: String, default: '' },
+  notificationChain: { type: String, default: '' },
   tokenContract: { type: String, default: '' },
   warning: { type: String, default: '' },
 }, { timestamps: true });
