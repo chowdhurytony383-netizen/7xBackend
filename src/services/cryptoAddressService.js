@@ -10,12 +10,30 @@ import {
 } from './cryptoConfig.js';
 import { generateTatumDepositAddress } from './tatumService.js';
 
-function derivationIndexForUser(user, methodKey) {
-  const userKey = String(user?.userId || user?.clientNumber || user?._id || user?.id || '0');
-  const digits = userKey.replace(/\D/g, '');
-  const idBase = digits ? Number(digits.slice(-5)) : 0;
-  const methodOffset = Array.from(String(methodKey || '')).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return Math.max(0, (idBase + methodOffset) % 100000);
+function normalizeIndex(value) {
+  const number = Number(value);
+  if (Number.isInteger(number) && number >= 0 && number <= 1000000) return number;
+  return null;
+}
+
+async function getExistingAddress(user, method) {
+  return UserCryptoAddress.findOne({ user: user._id, methodKey: method.key });
+}
+
+async function allocateDerivationIndex({ user, method, existing }) {
+  const savedIndex = normalizeIndex(existing?.derivationIndex);
+  if (savedIndex !== null) return savedIndex;
+
+  // Tatum accepted the user's ETH XPUB at index 1, while large/hash indexes were failing.
+  // Use a simple sequential index per XPUB/network group: 1,2,3,4...
+  // This keeps indexes small and stable for production users.
+  const xpubGroup = method.xpubEnvKey || method.key;
+  const usedCount = await UserCryptoAddress.countDocuments({
+    xpubEnvKey: xpubGroup,
+    derivationIndex: { $type: 'number' },
+  });
+
+  return usedCount + 1;
 }
 
 export async function syncDefaultCryptoMethods() {
@@ -24,8 +42,6 @@ export async function syncDefaultCryptoMethods() {
 
   for (const method of DEFAULT_CRYPTO_METHODS) {
     const enabled = enabledKeys.size ? enabledKeys.has(method.key) : true;
-    // Important: update existing method docs too, not only insert.
-    // Older rows may miss addressFamily/xpubEnvKey, causing every address to fail.
     const doc = await CryptoMethod.findOneAndUpdate(
       { key: method.key },
       {
@@ -47,8 +63,8 @@ export async function getActiveCryptoMethods() {
   return CryptoMethod.find({ enabled: true }).sort({ sortOrder: 1, displayName: 1 });
 }
 
-async function upsertAddressStatus({ user, method, status, address = '', errorMessage = '' }) {
-  const derivationIndex = derivationIndexForUser(user, method.key);
+async function upsertAddressStatus({ user, method, status, address = '', errorMessage = '', derivationIndex = null }) {
+  const finalIndex = derivationIndex ?? (await allocateDerivationIndex({ user, method, existing: await getExistingAddress(user, method) }));
 
   return UserCryptoAddress.findOneAndUpdate(
     { user: user._id, methodKey: method.key },
@@ -62,7 +78,7 @@ async function upsertAddressStatus({ user, method, status, address = '', errorMe
         network: method.network,
         address,
         provider: env.CRYPTO_PROVIDER || 'tatum',
-        derivationIndex,
+        derivationIndex: finalIndex,
         xpubEnvKey: method.xpubEnvKey || '',
         status,
         errorMessage,
@@ -74,11 +90,16 @@ async function upsertAddressStatus({ user, method, status, address = '', errorMe
 }
 
 export async function ensureUserCryptoAddress(user, method) {
-  const existing = await UserCryptoAddress.findOne({ user: user._id, methodKey: method.key });
+  const existing = await getExistingAddress(user, method);
   if (existing?.status === 'active' && existing.address) return existing;
 
   if (!env.CRYPTO_AUTO_CREATE_ADDRESSES) {
-    return upsertAddressStatus({ user, method, status: 'pending', errorMessage: 'Automatic crypto address creation is disabled.' });
+    return upsertAddressStatus({
+      user,
+      method,
+      status: 'pending',
+      errorMessage: 'Automatic crypto address creation is disabled.',
+    });
   }
 
   const xpub = getXpubForMethod(method);
@@ -91,8 +112,9 @@ export async function ensureUserCryptoAddress(user, method) {
     });
   }
 
+  const derivationIndex = await allocateDerivationIndex({ user, method, existing });
+
   try {
-    const derivationIndex = derivationIndexForUser(user, method.key);
     const result = await generateTatumDepositAddress({ method, xpub, index: derivationIndex });
     return UserCryptoAddress.findOneAndUpdate(
       { user: user._id, methodKey: method.key },
@@ -121,6 +143,7 @@ export async function ensureUserCryptoAddress(user, method) {
       method,
       status: 'failed',
       errorMessage: error.message || 'Unable to generate crypto address.',
+      derivationIndex,
     });
   }
 }
