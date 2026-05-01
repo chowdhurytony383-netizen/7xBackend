@@ -27,6 +27,7 @@ import agentPaymentRoutes from './routes/agentPaymentRoutes.js';
 import agentRequestRoutes from './routes/agentRequestRoutes.js';
 import adminAgentRequestRoutes from './routes/adminAgentRequestRoutes.js';
 import depositMethodRoutes from './routes/depositMethodRoutes.js';
+import crashGameRoutes from './routes/crashGameRoutes.js';
 
 configurePassport();
 
@@ -51,6 +52,7 @@ app.get('/api/health', (_req, res) => res.json({ success: true, app: '7XBET back
 app.use('/api/user', userRoutes);
 app.use('/api/bet', betRoutes);
 app.use('/api/games', gameRoutes);
+app.use('/api/crash', crashGameRoutes);
 app.use('/api/source-games', sourceGameRoutes);
 app.use('/api/agent', agentRoutes);
 app.use('/api/agent', agentPaymentRoutes);
