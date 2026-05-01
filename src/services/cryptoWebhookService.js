@@ -27,11 +27,38 @@ function lower(value) {
 }
 
 function amountFromEvent(event) {
-  const direct = toNumber(event.amount ?? event.amountCrypto ?? event.tokenAmount ?? event.valueReadable ?? event.valueConverted);
-  if (direct > 0) return direct;
+  // Tatum ADDRESS_EVENT payloads can send native transfers as a human-readable
+  // decimal string in `value`, for example BSC/BNB: { value: "0.00049" }.
+  // Token payloads may send amount/tokenAmount/valueReadable, or raw value + decimals.
+  const directCandidates = [
+    event.amount,
+    event.amountCrypto,
+    event.tokenAmount,
+    event.valueReadable,
+    event.valueConverted,
+    event.amountReadable,
+    event.tokenMetadata?.value,
+  ];
 
-  const rawValue = event.value ?? event.amountRaw ?? event.tokenValue;
-  const decimals = Number(event.decimals ?? event.tokenDecimals);
+  // Treat `value` as direct amount when it is already a decimal string/number.
+  if (event.value !== undefined && event.value !== null && event.value !== '') {
+    const valueString = String(event.value);
+    const valueNumber = Number(valueString);
+    if (Number.isFinite(valueNumber) && valueNumber > 0) {
+      // Decimal strings like "0.00049" are human-readable amounts.
+      if (valueString.includes('.') || valueNumber < 1) return valueNumber;
+      // If token metadata says this is a native transfer, Tatum also gives value readable.
+      if (String(event.tokenMetadata?.type || '').toLowerCase() === 'native') return valueNumber;
+    }
+  }
+
+  for (const candidate of directCandidates) {
+    const number = toNumber(candidate);
+    if (number > 0) return number;
+  }
+
+  const rawValue = event.amountRaw ?? event.tokenValue ?? event.rawValue;
+  const decimals = Number(event.decimals ?? event.tokenDecimals ?? event.tokenMetadata?.decimals);
   const rawNumber = Number(rawValue);
   if (Number.isFinite(rawNumber) && rawNumber > 0 && Number.isFinite(decimals) && decimals > 0 && decimals <= 30) {
     return rawNumber / (10 ** decimals);
@@ -65,11 +92,41 @@ function eventIndexFromEvent(event, index) {
 }
 
 function eventSymbol(event) {
-  return String(event.symbol || event.asset || event.currency || event.tokenSymbol || event.token || '').trim().toUpperCase();
+  return String(
+    event.symbol
+    || event.asset
+    || event.currency
+    || event.tokenSymbol
+    || event.token
+    || event.tokenMetadata?.symbol
+    || ''
+  ).trim().toUpperCase();
 }
 
 function eventContract(event) {
-  return lower(event.contractAddress || event.tokenAddress || event.smartContractAddress || event.assetAddress || '');
+  return lower(
+    event.contractAddress
+    || event.tokenAddress
+    || event.smartContractAddress
+    || event.assetAddress
+    || event.tokenMetadata?.contractAddress
+    || event.tokenMetadata?.address
+    || ''
+  );
+}
+
+function isNativeTransfer(event) {
+  return String(event.raw?.tokenMetadata?.type || event.raw?.type || '').trim().toLowerCase() === 'native';
+}
+
+function eventRawSymbol(event) {
+  return String(
+    event.raw?.tokenMetadata?.symbol
+    || event.raw?.currency
+    || event.raw?.symbol
+    || event.symbol
+    || ''
+  ).trim().toUpperCase();
 }
 
 export function normalizeTatumWebhookEvents(payload) {
@@ -110,18 +167,35 @@ async function findUserAddress(address) {
 }
 
 function isExpectedAsset({ event, method, userAddress }) {
-  const symbol = event.symbol;
+  const symbol = String(event.symbol || '').toUpperCase();
+  const rawSymbol = eventRawSymbol(event);
   const contract = event.contractAddress;
   const methodContract = lower(method?.tokenContract || '');
+  const methodKey = String(method?.key || userAddress.methodKey || '').toUpperCase();
   const methodCoin = String(method?.coin || userAddress.coin || '').toUpperCase();
 
-  // If Tatum provides token contract, enforce the contract for token deposit methods.
+  // Token methods: enforce contract when Tatum provides a token contract.
   if (methodContract && contract) return contract === methodContract;
 
-  // If Tatum provides a symbol, enforce it.
-  if (symbol) {
-    if (methodCoin === 'USDT') return symbol === 'USDT';
-    return symbol === methodCoin;
+  // USDT methods without contract in payload: accept USDT symbol only.
+  if (methodCoin === 'USDT' || methodKey.startsWith('USDT_')) {
+    return symbol === 'USDT' || rawSymbol === 'USDT';
+  }
+
+  // Native BNB on BNB Smart Chain is reported by Tatum as currency "BSC" with
+  // tokenMetadata.symbol "BNB". Accept either BSC or BNB for the BNB method.
+  if (methodKey === 'BNB' || methodCoin === 'BNB') {
+    return ['BNB', 'BSC'].includes(symbol) || ['BNB', 'BSC'].includes(rawSymbol) || isNativeTransfer(event);
+  }
+
+  // Native Ethereum may appear as ETH.
+  if (methodKey === 'ETH' || methodCoin === 'ETH') {
+    return ['ETH'].includes(symbol) || ['ETH'].includes(rawSymbol) || (!methodContract && isNativeTransfer(event));
+  }
+
+  // Native BTC/LTC and other native coins.
+  if (symbol || rawSymbol) {
+    return symbol === methodCoin || rawSymbol === methodCoin;
   }
 
   // Without symbol/contract, accept native-chain webhooks for native methods only.
