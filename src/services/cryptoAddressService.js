@@ -11,10 +11,14 @@ import {
 import { generateTatumDepositAddress } from './tatumService.js';
 
 function derivationIndexForUser(user, methodKey) {
-  const rawId = String(user?._id || user?.id || '').replace(/[^a-f0-9]/gi, '');
-  const base = rawId ? parseInt(rawId.slice(-7), 16) : Math.floor(Math.random() * 1000000);
+  // Tatum address endpoints are more reliable with compact non-hardened indexes.
+  // The previous implementation could create very large indexes from Mongo ObjectIds,
+  // which may be rejected by Tatum with "Request validation failed".
+  const userKey = String(user?.userId || user?.clientNumber || user?._id || user?.id || '0');
+  const digits = userKey.replace(/\D/g, '');
+  const idBase = digits ? Number(digits.slice(-5)) : 0;
   const methodOffset = Array.from(String(methodKey || '')).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return Math.max(0, (base + methodOffset) % 2000000000);
+  return Math.max(0, (idBase + methodOffset) % 100000);
 }
 
 export async function syncDefaultCryptoMethods() {
