@@ -9,7 +9,9 @@
     "start": "node src/server.js",
     "seed": "node src/seed/seed.js",
     "check": "node --check src/server.js",
-    "crypto:addresses": "node src/seed/createCryptoAddressesForUsers.js"
+    "crypto:addresses": "node src/seed/createCryptoAddressesForUsers.js",
+    "crypto:subscriptions": "node src/seed/createCryptoSubscriptions.js",
+    "crypto:credit-pending": "node src/seed/creditPendingCryptoDeposits.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
