@@ -6,6 +6,7 @@ import { setAuthCookies } from '../utils/tokens.js';
 import { sanitizeUser } from '../utils/sanitize.js';
 import { createUniqueUserId, fallbackOAuthPassword } from '../utils/identity.js';
 import { countryFromLocale, defaultCountry } from '../utils/countries.js';
+import { triggerCryptoAddressCreationForUser } from '../services/cryptoAddressService.js';
 
 function getOAuthCountry(profile) {
   const locale = profile?._json?.locale || profile?._json?.country || profile?.locale;
@@ -51,6 +52,7 @@ export const devGoogle = asyncHandler(async (_req, res) => {
     return res.status(501).json({ success: false, message: 'Passport Google OAuth is configured in routes. Use passport strategy route.' });
   }
   const user = await devSocialUser('google');
+  triggerCryptoAddressCreationForUser(user);
   setAuthCookies(res, user);
   res.redirect(env.FRONTEND_URL);
 });
@@ -60,6 +62,7 @@ export const devFacebook = asyncHandler(async (_req, res) => {
     return res.status(501).json({ success: false, message: 'Passport Facebook OAuth is configured in routes. Use passport strategy route.' });
   }
   const user = await devSocialUser('facebook');
+  triggerCryptoAddressCreationForUser(user);
   setAuthCookies(res, user);
   res.redirect(env.FRONTEND_URL);
 });
@@ -91,5 +94,6 @@ export async function serializeOAuthUser(profile, provider) {
     user.registrationType = provider;
     await user.save();
   }
+  triggerCryptoAddressCreationForUser(user);
   return sanitizeUser(user) && user;
 }

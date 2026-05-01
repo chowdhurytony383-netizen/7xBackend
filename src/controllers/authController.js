@@ -11,6 +11,7 @@ import { env } from '../config/env.js';
 import { createUniqueUserId, generatePassword } from '../utils/identity.js';
 import { currencyForResolvedCountry, resolveRegistrationCountry } from '../utils/requestCountry.js';
 import { saveUploadedFile } from '../utils/cloudinary.js';
+import { triggerCryptoAddressCreationForUser } from '../services/cryptoAddressService.js';
 
 async function createAndSendVerification(user) {
   const token = randomToken(24);
@@ -50,6 +51,7 @@ export const register = asyncHandler(async (req, res) => {
     isVerified: false,
   });
 
+  triggerCryptoAddressCreationForUser(user);
   await createAndSendVerification(user);
   setAuthCookies(res, user);
 
@@ -89,6 +91,7 @@ export const oneClickRegister = asyncHandler(async (req, res) => {
     verificationStatus: 'not_submitted',
   });
 
+  triggerCryptoAddressCreationForUser(user);
   setAuthCookies(res, user);
   res.status(201).json({
     success: true,
