@@ -32,6 +32,18 @@ export const env = {
   FACEBOOK_APP_ID: process.env.FACEBOOK_APP_ID || '',
   FACEBOOK_APP_SECRET: process.env.FACEBOOK_APP_SECRET || '',
   OAUTH_CALLBACK_BASE_URL: process.env.OAUTH_CALLBACK_BASE_URL || `http://localhost:${process.env.PORT || 3000}`,
+  CORS_ORIGIN: process.env.CORS_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:5174',
+  CRYPTO_PROVIDER: process.env.CRYPTO_PROVIDER || 'tatum',
+  TATUM_API_KEY: process.env.TATUM_API_KEY || '',
+  TATUM_API_BASE_URL: process.env.TATUM_API_BASE_URL || 'https://api.tatum.io',
+  CRYPTO_AUTO_CREATE_ADDRESSES: String(process.env.CRYPTO_AUTO_CREATE_ADDRESSES || 'true').toLowerCase() === 'true',
+  CRYPTO_ENABLED_METHODS: process.env.CRYPTO_ENABLED_METHODS || 'BTC,ETH,USDT_ERC20,USDT_TRC20,LTC',
+  TATUM_BTC_XPUB: process.env.TATUM_BTC_XPUB || '',
+  TATUM_ETH_XPUB: process.env.TATUM_ETH_XPUB || '',
+  TATUM_TRON_XPUB: process.env.TATUM_TRON_XPUB || '',
+  TATUM_LTC_XPUB: process.env.TATUM_LTC_XPUB || '',
+  TATUM_BSC_XPUB: process.env.TATUM_BSC_XPUB || '',
+  CRYPTO_WEBHOOK_SECRET: process.env.CRYPTO_WEBHOOK_SECRET || '',
 };
 
 export const isProduction = env.NODE_ENV === 'production';
