@@ -1,11 +1,18 @@
+import http from 'http';
 import app from './app.js';
 import { connectDB } from './config/db.js';
 import { env } from './config/env.js';
+import { initRealtimeSockets } from './socket/index.js';
 
 async function start() {
   await connectDB();
-  app.listen(env.PORT, () => {
+
+  const server = http.createServer(app);
+  await initRealtimeSockets(server);
+
+  server.listen(env.PORT, () => {
     console.log(`7XBET backend running on http://localhost:${env.PORT}`);
+    console.log('Realtime crash socket engine is active.');
   });
 }
 
