@@ -28,6 +28,8 @@ import agentRequestRoutes from './routes/agentRequestRoutes.js';
 import adminAgentRequestRoutes from './routes/adminAgentRequestRoutes.js';
 import depositMethodRoutes from './routes/depositMethodRoutes.js';
 import crashGameRoutes from './routes/crashGameRoutes.js';
+import cryptoRoutes from './routes/cryptoRoutes.js';
+import adminCryptoRoutes from './routes/adminCryptoRoutes.js';
 
 configurePassport();
 
@@ -53,6 +55,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/bet', betRoutes);
 app.use('/api/games', gameRoutes);
 app.use('/api/crash', crashGameRoutes);
+app.use('/api/crypto', cryptoRoutes);
 app.use('/api/source-games', sourceGameRoutes);
 app.use('/api/agent', agentRoutes);
 app.use('/api/agent', agentPaymentRoutes);
@@ -61,6 +64,7 @@ app.use('/api/vgames', vgamesRoutes);
 app.use('/api/transaction', transactionRoutes);
 app.use('/api/razorpay', razorpayRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin', adminCryptoRoutes);
 app.use('/api/admin', adminAgentPaymentRoutes);
 app.use('/api/admin', adminAgentRequestRoutes);
 app.use('/api/admin', depositMethodRoutes);
