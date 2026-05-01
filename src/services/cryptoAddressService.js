@@ -11,9 +11,6 @@ import {
 import { generateTatumDepositAddress } from './tatumService.js';
 
 function derivationIndexForUser(user, methodKey) {
-  // Tatum address endpoints are more reliable with compact non-hardened indexes.
-  // The previous implementation could create very large indexes from Mongo ObjectIds,
-  // which may be rejected by Tatum with "Request validation failed".
   const userKey = String(user?.userId || user?.clientNumber || user?._id || user?.id || '0');
   const digits = userKey.replace(/\D/g, '');
   const idBase = digits ? Number(digits.slice(-5)) : 0;
@@ -27,9 +24,16 @@ export async function syncDefaultCryptoMethods() {
 
   for (const method of DEFAULT_CRYPTO_METHODS) {
     const enabled = enabledKeys.size ? enabledKeys.has(method.key) : true;
+    // Important: update existing method docs too, not only insert.
+    // Older rows may miss addressFamily/xpubEnvKey, causing every address to fail.
     const doc = await CryptoMethod.findOneAndUpdate(
       { key: method.key },
-      { $setOnInsert: method, $set: { enabled } },
+      {
+        $set: {
+          ...method,
+          enabled,
+        },
+      },
       { new: true, upsert: true }
     );
     docs.push(doc);

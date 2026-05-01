@@ -87,6 +87,13 @@ export const DEFAULT_CRYPTO_METHODS = [
   },
 ];
 
+function cleanValue(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .trim();
+}
+
 export function getEnabledCryptoKeys() {
   return String(env.CRYPTO_ENABLED_METHODS || '')
     .split(',')
@@ -101,7 +108,7 @@ export function getDefaultCryptoMethod(key) {
 
 export function getXpubForMethod(method) {
   const envKey = method?.xpubEnvKey;
-  return envKey ? (process.env[envKey] || env[envKey] || '') : '';
+  return envKey ? cleanValue(process.env[envKey] || env[envKey] || '') : '';
 }
 
 export function getCryptoProviderName() {
