@@ -44,6 +44,10 @@ export const env = {
   TATUM_LTC_XPUB: process.env.TATUM_LTC_XPUB || '',
   TATUM_BSC_XPUB: process.env.TATUM_BSC_XPUB || '',
   CRYPTO_WEBHOOK_SECRET: process.env.CRYPTO_WEBHOOK_SECRET || '',
+  CRYPTO_WEBHOOK_URL: process.env.CRYPTO_WEBHOOK_URL || '',
+  CRYPTO_CREDIT_ON_BLOCK: String(process.env.CRYPTO_CREDIT_ON_BLOCK || 'true').toLowerCase() === 'true',
+  CRYPTO_PRICE_CACHE_MS: Number(process.env.CRYPTO_PRICE_CACHE_MS || 60000),
+  CRYPTO_DEFAULT_FIAT: process.env.CRYPTO_DEFAULT_FIAT || 'BDT',
 };
 
 export const isProduction = env.NODE_ENV === 'production';
