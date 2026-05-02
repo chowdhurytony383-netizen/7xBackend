@@ -74,14 +74,24 @@ export async function getBscPrivateKeyForAddress(addressDoc) {
 async function sendBnbToCompanyWallet({ fromPrivateKey, amount }) {
   if (!env.COMPANY_BSC_ADDRESS) throw new AppError('COMPANY_BSC_ADDRESS is not configured.', 503);
 
+  const gasLimit = String(env.CRYPTO_SWEEP_BNB_GAS_LIMIT || '30000').trim();
+  const gasPrice = String(env.CRYPTO_SWEEP_BNB_GAS_PRICE || '').trim();
+
+  const body = {
+    to: env.COMPANY_BSC_ADDRESS,
+    currency: 'BSC',
+    amount: String(amount),
+    fromPrivateKey,
+    gasLimit,
+  };
+
+  // Optional: only set gasPrice when you explicitly configure it. If empty,
+  // Tatum will use its own gas price calculation.
+  if (gasPrice) body.gasPrice = gasPrice;
+
   return tatumRequest('bsc/transaction', {
     method: 'POST',
-    body: {
-      to: env.COMPANY_BSC_ADDRESS,
-      currency: 'BSC',
-      amount: String(amount),
-      fromPrivateKey,
-    },
+    body,
   });
 }
 
@@ -100,7 +110,7 @@ export async function sweepOneBnbDeposit(deposit, { dryRun = env.CRYPTO_SWEEP_DR
   if (!addressDoc) throw new AppError('Matching active BNB user crypto address was not found.', 404);
 
   const amountCrypto = Number(deposit.amountCrypto || 0);
-  const reserve = Number(env.CRYPTO_SWEEP_BNB_GAS_RESERVE || 0.00015);
+  const reserve = Number(env.CRYPTO_SWEEP_BNB_GAS_RESERVE || 0.00025);
   const minAmount = Number(env.CRYPTO_SWEEP_MIN_BNB || 0.0002);
   const sweepAmount = amountCrypto - reserve;
 
