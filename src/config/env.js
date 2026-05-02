@@ -44,6 +44,7 @@ export const env = {
   TATUM_TRON_XPUB: process.env.TATUM_TRON_XPUB || '',
   TATUM_LTC_XPUB: process.env.TATUM_LTC_XPUB || '',
   TATUM_BSC_XPUB: process.env.TATUM_BSC_XPUB || '',
+  TATUM_BSC_SIGNATURE_ID: process.env.TATUM_BSC_SIGNATURE_ID || '',
   CRYPTO_WEBHOOK_SECRET: process.env.CRYPTO_WEBHOOK_SECRET || '',
   CRYPTO_WEBHOOK_URL: process.env.CRYPTO_WEBHOOK_URL || '',
   CRYPTO_CREDIT_ON_BLOCK: String(process.env.CRYPTO_CREDIT_ON_BLOCK || 'true').toLowerCase() === 'true',
@@ -59,8 +60,12 @@ export const env = {
   CRYPTO_SWEEP_ENABLED: String(process.env.CRYPTO_SWEEP_ENABLED || 'false').toLowerCase() === 'true',
   CRYPTO_SWEEP_MODE: process.env.CRYPTO_SWEEP_MODE || 'manual',
   CRYPTO_SWEEP_DRY_RUN: String(process.env.CRYPTO_SWEEP_DRY_RUN || 'true').toLowerCase() === 'true',
-  CRYPTO_SWEEP_BNB_GAS_RESERVE: Number(process.env.CRYPTO_SWEEP_BNB_GAS_RESERVE || '0.00015'),
+  CRYPTO_SWEEP_BNB_GAS_RESERVE: Number(process.env.CRYPTO_SWEEP_BNB_GAS_RESERVE || '0.00025'),
+  CRYPTO_SWEEP_BNB_GAS_LIMIT: Number(process.env.CRYPTO_SWEEP_BNB_GAS_LIMIT || '30000'),
+  CRYPTO_SWEEP_BNB_GAS_PRICE: process.env.CRYPTO_SWEEP_BNB_GAS_PRICE || '',
   CRYPTO_SWEEP_MIN_BNB: Number(process.env.CRYPTO_SWEEP_MIN_BNB || '0.0002'),
+
+  // Kept only for old direct_test compatibility. Do not use in production.
   TATUM_BSC_MNEMONIC: process.env.TATUM_BSC_MNEMONIC || '',
 };
 
