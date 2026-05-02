@@ -31,8 +31,6 @@ const cryptoDepositSchema = new mongoose.Schema({
   rawPayload: { type: mongoose.Schema.Types.Mixed, default: {} },
   creditedAt: Date,
 
-  // Sweep / consolidation tracking. These fields track moving the real crypto
-  // from the user deposit address into your company Trust Wallet address.
   sweepStatus: {
     type: String,
     enum: ['pending', 'requested', 'swept', 'failed', 'skipped'],
@@ -43,6 +41,9 @@ const cryptoDepositSchema = new mongoose.Schema({
   sweepTargetAddress: { type: String, default: '' },
   sweepAmountCrypto: { type: Number, default: 0 },
   sweepTxHash: { type: String, default: '', index: true },
+  sweepKmsId: { type: String, default: '', index: true },
+  sweepSignatureId: { type: String, default: '' },
+  sweepPayload: { type: mongoose.Schema.Types.Mixed, default: {} },
   sweepError: { type: String, default: '' },
   sweepRequestedAt: Date,
   sweptAt: Date,
