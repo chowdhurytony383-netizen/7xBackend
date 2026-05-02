@@ -14,7 +14,9 @@ console.log('Sweep enabled:', env.CRYPTO_SWEEP_ENABLED);
 console.log('Dry run:', dryRun);
 console.log('Company BSC address:', env.COMPANY_BSC_ADDRESS || 'MISSING');
 console.log('BNB gas reserve:', env.CRYPTO_SWEEP_BNB_GAS_RESERVE);
+console.log('BNB gas limit:', env.CRYPTO_SWEEP_BNB_GAS_LIMIT);
 console.log('BNB minimum sweep:', env.CRYPTO_SWEEP_MIN_BNB);
+console.log('BSC signatureId:', env.TATUM_BSC_SIGNATURE_ID ? `${env.TATUM_BSC_SIGNATURE_ID.slice(0, 8)}...` : 'MISSING');
 
 const results = await sweepPendingBnbDeposits({ limit, dryRun });
 
@@ -23,11 +25,11 @@ if (!results.length) {
 } else {
   for (const result of results) {
     if (result.ok && result.status === 'dry_run') {
-      console.log(`DRY RUN: ${result.txHash} ${result.amountCrypto} BNB -> sweep ${result.sweepAmount} BNB to ${result.to} (index ${result.derivationIndex})`);
+      console.log(`DRY RUN: ${result.txHash} ${result.amountCrypto} BNB -> sweep ${result.sweepAmount} BNB to ${result.to} (index ${result.derivationIndex}, mode ${result.mode})`);
     } else if (result.ok && result.status === 'swept') {
       console.log(`SWEPT: ${result.txHash} -> sweep tx ${result.txHash || result.deposit?.sweepTxHash}`);
     } else if (result.ok && result.status === 'requested') {
-      console.log(`REQUESTED: ${result.txHash} -> waiting for tx hash`);
+      console.log(`REQUESTED: ${result.txHash} -> kmsId=${result.kmsId || 'n/a'}; KMS daemon must sign/broadcast it.`);
     } else if (result.ok && result.status === 'skipped') {
       console.log(`SKIPPED: ${result.txHash} - ${result.reason}`);
     } else if (result.ok && result.status === 'already_swept') {
