@@ -59,6 +59,46 @@ export const adminSyncCryptoSubscriptions = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Crypto subscriptions synced', data: result });
 });
 
+export const kmsApproveTransaction = asyncHandler(async (req, res) => {
+  const kmsId = String(req.params.kmsId || req.params.id || req.query.id || '').trim();
+  assertOrThrow(kmsId, 'KMS transaction ID is required', 400);
+
+  const deposit = await CryptoDeposit.findOne({
+    methodKey: 'BNB',
+    sweepKmsId: kmsId,
+  }).sort({ updatedAt: -1 });
+
+  if (!deposit) {
+    throw new AppError(`KMS transaction ${kmsId} was not found in sweep records`, 404);
+  }
+
+  if (deposit.sweepStatus !== 'requested') {
+    throw new AppError(`KMS transaction ${kmsId} is not in requested status`, 403);
+  }
+
+  if (env.TATUM_BSC_SIGNATURE_ID && deposit.sweepSignatureId && deposit.sweepSignatureId !== env.TATUM_BSC_SIGNATURE_ID) {
+    throw new AppError('KMS signature ID mismatch', 403);
+  }
+
+  await CryptoDeposit.updateOne(
+    { _id: deposit._id },
+    {
+      $set: {
+        sweepError: 'KMS approval granted. Waiting for KMS daemon to sign and broadcast.',
+        sweepApprovedAt: new Date(),
+      },
+    }
+  );
+
+  // Tatum KMS only needs an HTTP 200 response from the external URL to approve signing.
+  res.status(200).json({
+    success: true,
+    approved: true,
+    kmsId,
+    depositId: deposit._id,
+  });
+});
+
 export const tatumWebhook = asyncHandler(async (req, res) => {
   if (env.CRYPTO_WEBHOOK_SECRET) {
     const provided = req.headers['x-webhook-secret']
