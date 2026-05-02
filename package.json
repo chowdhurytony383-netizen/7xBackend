@@ -13,8 +13,7 @@
     "crypto:subscriptions": "node src/seed/createCryptoSubscriptions.js",
     "crypto:credit-pending": "node src/seed/creditPendingCryptoDeposits.js",
     "crypto:reprocess-ignored": "node src/seed/reprocessIgnoredCryptoDeposits.js",
-    "crypto:sweep-bnb": "node src/seed/sweepPendingBnbDeposits.js",
-    "crypto:debug-bnb-key": "node src/seed/debugBnbSweepKey.js"
+    "crypto:sweep-bnb": "node src/seed/sweepPendingBnbDeposits.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -34,7 +33,7 @@
     "passport-facebook": "^3.0.0",
     "passport-google-oauth20": "^2.0.0",
     "razorpay": "^2.9.4",
-    "validator": "^13.12.0",
+    "validator": "^13.12.1",
     "cloudinary": "^2.5.1",
     "socket.io": "^4.8.1"
   },
