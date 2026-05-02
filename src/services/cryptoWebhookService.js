@@ -7,6 +7,7 @@ import { env } from '../config/env.js';
 import { AppError, assertOrThrow } from '../utils/appError.js';
 import { creditWallet } from '../utils/wallet.js';
 import { convertCryptoToFiat } from './cryptoPriceService.js';
+import { maybeAutoSweepAfterCredit } from './cryptoAutoSweepService.js';
 
 function toNumber(value) {
   if (value === undefined || value === null || value === '') return 0;
@@ -375,6 +376,13 @@ export async function processCryptoWebhookPayload(payload) {
       deposit.creditError = '';
       await deposit.save();
 
+      let autoSweep = { status: 'not_attempted' };
+      try {
+        autoSweep = await maybeAutoSweepAfterCredit(deposit);
+      } catch (sweepError) {
+        autoSweep = { status: 'failed', error: sweepError.message || 'Auto sweep trigger failed' };
+      }
+
       credited += 1;
       results.push({
         txHash: event.txHash,
@@ -384,6 +392,7 @@ export async function processCryptoWebhookPayload(payload) {
         amountCrypto: event.amountCrypto,
         amountFiat: conversion.amountFiat,
         fiatCurrency,
+        autoSweep,
       });
     } catch (error) {
       deposit.status = 'confirming';
