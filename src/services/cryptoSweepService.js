@@ -51,8 +51,23 @@ export async function getBscPrivateKeyForAddress(addressDoc) {
     },
   });
 
-  const key = String(payload?.key || payload?.privateKey || payload?.data?.key || '').trim();
-  if (!key) throw new AppError('Tatum did not return a BSC private key for this derivation index.', 502);
+  const rawKey = String(
+    payload?.key
+    || payload?.privateKey
+    || payload?.data?.key
+    || payload?.data?.privateKey
+    || payload?.result?.key
+    || payload?.result?.privateKey
+    || ''
+  ).trim();
+
+  if (!rawKey) throw new AppError('Tatum did not return a BSC private key for this derivation index.', 502);
+
+  const key = rawKey.startsWith('0x') ? rawKey : `0x${rawKey}`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
+    throw new AppError(`Generated BSC private key format is invalid. length=${key.length}`, 502);
+  }
+
   return key;
 }
 
@@ -154,10 +169,13 @@ export async function sweepOneBnbDeposit(deposit, { dryRun = env.CRYPTO_SWEEP_DR
 
     return { status: txHash ? 'swept' : 'requested', txHash, payload, deposit: updated };
   } catch (error) {
+    const payloadText = error?.payload ? ` | Tatum payload: ${JSON.stringify(error.payload)}` : '';
+    const errorMessage = `${error.message || 'BNB sweep failed'}${payloadText}`;
     await CryptoDeposit.updateOne(
       { _id: deposit._id },
-      { $set: { sweepStatus: 'failed', sweepError: error.message || 'BNB sweep failed', sweepMode: env.CRYPTO_SWEEP_MODE } }
+      { $set: { sweepStatus: 'failed', sweepError: errorMessage, sweepMode: env.CRYPTO_SWEEP_MODE } }
     );
+    error.message = errorMessage;
     throw error;
   }
 }
