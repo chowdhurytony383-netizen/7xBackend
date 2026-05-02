@@ -25,17 +25,34 @@ function txHashFromPayload(payload) {
     || payload?.id
     || payload?.data?.txId
     || payload?.data?.txHash
+    || payload?.result?.txId
+    || payload?.result?.txHash
     || ''
   ).trim();
+}
+
+function kmsIdFromPayload(payload) {
+  return String(
+    payload?.id
+    || payload?.kmsId
+    || payload?.signatureId
+    || payload?.data?.id
+    || payload?.result?.id
+    || ''
+  ).trim();
+}
+
+export function isKmsSweepAllowed() {
+  return env.CRYPTO_SWEEP_ENABLED && String(env.CRYPTO_SWEEP_MODE || '').toLowerCase() === 'kms';
 }
 
 export function isDirectSweepAllowed() {
   return env.CRYPTO_SWEEP_ENABLED && String(env.CRYPTO_SWEEP_MODE || '').toLowerCase() === 'direct_test';
 }
 
-export async function getBscPrivateKeyForAddress(addressDoc) {
+async function getBscPrivateKeyForAddress(addressDoc) {
   if (!env.TATUM_BSC_MNEMONIC) {
-    throw new AppError('TATUM_BSC_MNEMONIC is not configured. Direct BNB sweep cannot sign the transaction.', 503);
+    throw new AppError('TATUM_BSC_MNEMONIC is not configured. Direct test sweep cannot sign the transaction.', 503);
   }
 
   const index = Number(addressDoc?.derivationIndex);
@@ -45,10 +62,7 @@ export async function getBscPrivateKeyForAddress(addressDoc) {
 
   const payload = await tatumRequest('bsc/wallet/priv', {
     method: 'POST',
-    body: {
-      mnemonic: env.TATUM_BSC_MNEMONIC,
-      index,
-    },
+    body: { mnemonic: env.TATUM_BSC_MNEMONIC, index },
   });
 
   const rawKey = String(
@@ -71,33 +85,46 @@ export async function getBscPrivateKeyForAddress(addressDoc) {
   return key;
 }
 
-async function sendBnbToCompanyWallet({ fromPrivateKey, amount }) {
+function makeBnbTransferBase({ amount }) {
   if (!env.COMPANY_BSC_ADDRESS) throw new AppError('COMPANY_BSC_ADDRESS is not configured.', 503);
-
-  const gasLimit = String(env.CRYPTO_SWEEP_BNB_GAS_LIMIT || '30000').trim();
-  const gasPrice = String(env.CRYPTO_SWEEP_BNB_GAS_PRICE || '').trim();
 
   const body = {
     to: env.COMPANY_BSC_ADDRESS,
     currency: 'BSC',
     amount: String(amount),
-    fromPrivateKey,
-    gasLimit,
+    gasLimit: String(env.CRYPTO_SWEEP_BNB_GAS_LIMIT || '30000'),
   };
 
-  // Optional: only set gasPrice when you explicitly configure it. If empty,
-  // Tatum will use its own gas price calculation.
+  const gasPrice = String(env.CRYPTO_SWEEP_BNB_GAS_PRICE || '').trim();
   if (gasPrice) body.gasPrice = gasPrice;
+
+  return body;
+}
+
+async function sendBnbDirect({ fromPrivateKey, amount }) {
+  return tatumRequest('bsc/transaction', {
+    method: 'POST',
+    body: { ...makeBnbTransferBase({ amount }), fromPrivateKey },
+  });
+}
+
+async function requestBnbKmsSweep({ signatureId, index, amount }) {
+  if (!signatureId) throw new AppError('TATUM_BSC_SIGNATURE_ID is not configured.', 503);
+  if (!Number.isInteger(index) || index < 0) throw new AppError('BNB derivation index is missing or invalid for KMS sweep.', 400);
 
   return tatumRequest('bsc/transaction', {
     method: 'POST',
-    body,
+    body: {
+      ...makeBnbTransferBase({ amount }),
+      signatureId,
+      index,
+    },
   });
 }
 
 export async function sweepOneBnbDeposit(deposit, { dryRun = env.CRYPTO_SWEEP_DRY_RUN } = {}) {
   if (!deposit) throw new AppError('Crypto deposit is required.', 400);
-  if (deposit.methodKey !== 'BNB') throw new AppError('Only BNB sweep is supported by this test package.', 400);
+  if (deposit.methodKey !== 'BNB') throw new AppError('Only BNB sweep is supported by this package.', 400);
   if (deposit.status !== 'credited') throw new AppError('Only credited crypto deposits can be swept.', 400);
   if (deposit.sweepStatus === 'swept' && deposit.sweepTxHash) return { status: 'already_swept', deposit };
 
@@ -135,11 +162,13 @@ export async function sweepOneBnbDeposit(deposit, { dryRun = env.CRYPTO_SWEEP_DR
       reserve,
       sweepAmount: Number(amountString),
       derivationIndex: addressDoc.derivationIndex,
+      mode: env.CRYPTO_SWEEP_MODE,
+      signatureId: env.TATUM_BSC_SIGNATURE_ID ? `${env.TATUM_BSC_SIGNATURE_ID.slice(0, 8)}...` : 'MISSING',
     };
   }
 
-  if (!isDirectSweepAllowed()) {
-    throw new AppError('Direct sweep is disabled. Set CRYPTO_SWEEP_ENABLED=true and CRYPTO_SWEEP_MODE=direct_test to run this test sweep.', 403);
+  if (!isKmsSweepAllowed() && !isDirectSweepAllowed()) {
+    throw new AppError('BNB sweep is disabled. Use CRYPTO_SWEEP_MODE=kms and CRYPTO_SWEEP_ENABLED=true for KMS sweeps.', 403);
   }
 
   await CryptoDeposit.updateOne(
@@ -151,33 +180,49 @@ export async function sweepOneBnbDeposit(deposit, { dryRun = env.CRYPTO_SWEEP_DR
         sweepMode: env.CRYPTO_SWEEP_MODE,
         sweepTargetAddress: env.COMPANY_BSC_ADDRESS,
         sweepAmountCrypto: Number(amountString),
+        sweepSignatureId: env.TATUM_BSC_SIGNATURE_ID || '',
         sweepError: '',
       },
     }
   );
 
   try {
-    const privateKey = await getBscPrivateKeyForAddress(addressDoc);
-    const payload = await sendBnbToCompanyWallet({ fromPrivateKey: privateKey, amount: amountString });
+    let payload;
+    if (isKmsSweepAllowed()) {
+      payload = await requestBnbKmsSweep({
+        signatureId: env.TATUM_BSC_SIGNATURE_ID,
+        index: Number(addressDoc.derivationIndex),
+        amount: amountString,
+      });
+    } else {
+      const privateKey = await getBscPrivateKeyForAddress(addressDoc);
+      payload = await sendBnbDirect({ fromPrivateKey: privateKey, amount: amountString });
+    }
+
     const txHash = txHashFromPayload(payload);
+    const kmsId = kmsIdFromPayload(payload);
+    const finalStatus = txHash ? 'swept' : 'requested';
 
     const updated = await CryptoDeposit.findByIdAndUpdate(
       deposit._id,
       {
         $set: {
-          sweepStatus: txHash ? 'swept' : 'requested',
+          sweepStatus: finalStatus,
           sweepTxHash: txHash,
+          sweepKmsId: kmsId,
           sweepTargetAddress: env.COMPANY_BSC_ADDRESS,
           sweepAmountCrypto: Number(amountString),
           sweepMode: env.CRYPTO_SWEEP_MODE,
-          sweepError: txHash ? '' : 'Tatum transfer response did not include tx hash yet.',
+          sweepSignatureId: env.TATUM_BSC_SIGNATURE_ID || '',
+          sweepPayload: payload,
+          sweepError: txHash ? '' : 'KMS sweep request created. Waiting for KMS daemon to sign and broadcast.',
           sweptAt: txHash ? new Date() : undefined,
         },
       },
       { new: true }
     );
 
-    return { status: txHash ? 'swept' : 'requested', txHash, payload, deposit: updated };
+    return { status: finalStatus, txHash, kmsId, payload, deposit: updated };
   } catch (error) {
     const payloadText = error?.payload ? ` | Tatum payload: ${JSON.stringify(error.payload)}` : '';
     const errorMessage = `${error.message || 'BNB sweep failed'}${payloadText}`;
