@@ -33,11 +33,12 @@ export const env = {
   FACEBOOK_APP_SECRET: process.env.FACEBOOK_APP_SECRET || '',
   OAUTH_CALLBACK_BASE_URL: process.env.OAUTH_CALLBACK_BASE_URL || `http://localhost:${process.env.PORT || 3000}`,
   CORS_ORIGIN: process.env.CORS_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:5174',
+
   CRYPTO_PROVIDER: process.env.CRYPTO_PROVIDER || 'tatum',
   TATUM_API_KEY: process.env.TATUM_API_KEY || '',
   TATUM_API_BASE_URL: process.env.TATUM_API_BASE_URL || 'https://api.tatum.io',
   CRYPTO_AUTO_CREATE_ADDRESSES: String(process.env.CRYPTO_AUTO_CREATE_ADDRESSES || 'true').toLowerCase() === 'true',
-  CRYPTO_ENABLED_METHODS: process.env.CRYPTO_ENABLED_METHODS || 'BTC,ETH,USDT_ERC20,USDT_TRC20,LTC',
+  CRYPTO_ENABLED_METHODS: process.env.CRYPTO_ENABLED_METHODS || 'BTC,ETH,USDT_ERC20,USDT_TRC20,LTC,BNB',
   TATUM_BTC_XPUB: process.env.TATUM_BTC_XPUB || '',
   TATUM_ETH_XPUB: process.env.TATUM_ETH_XPUB || '',
   TATUM_TRON_XPUB: process.env.TATUM_TRON_XPUB || '',
@@ -48,6 +49,19 @@ export const env = {
   CRYPTO_CREDIT_ON_BLOCK: String(process.env.CRYPTO_CREDIT_ON_BLOCK || 'true').toLowerCase() === 'true',
   CRYPTO_PRICE_CACHE_MS: Number(process.env.CRYPTO_PRICE_CACHE_MS || 60000),
   CRYPTO_DEFAULT_FIAT: process.env.CRYPTO_DEFAULT_FIAT || 'BDT',
+
+  COMPANY_BTC_ADDRESS: process.env.COMPANY_BTC_ADDRESS || '',
+  COMPANY_ETH_ADDRESS: process.env.COMPANY_ETH_ADDRESS || '',
+  COMPANY_TRON_ADDRESS: process.env.COMPANY_TRON_ADDRESS || '',
+  COMPANY_LTC_ADDRESS: process.env.COMPANY_LTC_ADDRESS || '',
+  COMPANY_BSC_ADDRESS: process.env.COMPANY_BSC_ADDRESS || '',
+
+  CRYPTO_SWEEP_ENABLED: String(process.env.CRYPTO_SWEEP_ENABLED || 'false').toLowerCase() === 'true',
+  CRYPTO_SWEEP_MODE: process.env.CRYPTO_SWEEP_MODE || 'manual',
+  CRYPTO_SWEEP_DRY_RUN: String(process.env.CRYPTO_SWEEP_DRY_RUN || 'true').toLowerCase() === 'true',
+  CRYPTO_SWEEP_BNB_GAS_RESERVE: Number(process.env.CRYPTO_SWEEP_BNB_GAS_RESERVE || '0.00015'),
+  CRYPTO_SWEEP_MIN_BNB: Number(process.env.CRYPTO_SWEEP_MIN_BNB || '0.0002'),
+  TATUM_BSC_MNEMONIC: process.env.TATUM_BSC_MNEMONIC || '',
 };
 
 export const isProduction = env.NODE_ENV === 'production';
