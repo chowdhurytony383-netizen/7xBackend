@@ -12,7 +12,8 @@
     "crypto:addresses": "node src/seed/createCryptoAddressesForUsers.js",
     "crypto:subscriptions": "node src/seed/createCryptoSubscriptions.js",
     "crypto:credit-pending": "node src/seed/creditPendingCryptoDeposits.js",
-    "crypto:reprocess-ignored": "node src/seed/reprocessIgnoredCryptoDeposits.js"
+    "crypto:reprocess-ignored": "node src/seed/reprocessIgnoredCryptoDeposits.js",
+    "crypto:sweep-bnb": "node src/seed/sweepPendingBnbDeposits.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
