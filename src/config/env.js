@@ -64,6 +64,8 @@ export const env = {
   CRYPTO_SWEEP_BNB_GAS_LIMIT: Number(process.env.CRYPTO_SWEEP_BNB_GAS_LIMIT || '30000'),
   CRYPTO_SWEEP_BNB_GAS_PRICE: process.env.CRYPTO_SWEEP_BNB_GAS_PRICE || '',
   CRYPTO_SWEEP_MIN_BNB: Number(process.env.CRYPTO_SWEEP_MIN_BNB || '0.0002'),
+  CRYPTO_AUTO_SWEEP_ON_CREDIT: String(process.env.CRYPTO_AUTO_SWEEP_ON_CREDIT || 'false').toLowerCase() === 'true',
+  CRYPTO_AUTO_SWEEP_COINS: process.env.CRYPTO_AUTO_SWEEP_COINS || 'BNB',
 
   // Kept only for old direct_test compatibility. Do not use in production.
   TATUM_BSC_MNEMONIC: process.env.TATUM_BSC_MNEMONIC || '',
