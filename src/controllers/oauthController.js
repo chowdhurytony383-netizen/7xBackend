@@ -13,6 +13,17 @@ function getOAuthCountry(profile) {
   return countryFromLocale(locale) || defaultCountry;
 }
 
+function frontendAuthRedirect(tokens) {
+  const baseUrl = env.FRONTEND_URL.replace(/\/$/, '');
+  const params = new URLSearchParams({
+    authAccessToken: tokens.accessToken,
+    authRefreshToken: tokens.refreshToken,
+  });
+
+  // Use URL hash so tokens are not sent back to the frontend server in HTTP logs.
+  return `${baseUrl}/#${params.toString()}`;
+}
+
 async function buildOAuthUserPayload(profile, provider) {
   const country = getOAuthCountry(profile);
   const userId = await createUniqueUserId();
@@ -53,8 +64,8 @@ export const devGoogle = asyncHandler(async (_req, res) => {
   }
   const user = await devSocialUser('google');
   triggerCryptoAddressCreationForUser(user);
-  setAuthCookies(res, user);
-  res.redirect(env.FRONTEND_URL);
+  const tokens = setAuthCookies(res, user);
+  res.redirect(frontendAuthRedirect(tokens));
 });
 
 export const devFacebook = asyncHandler(async (_req, res) => {
@@ -63,13 +74,13 @@ export const devFacebook = asyncHandler(async (_req, res) => {
   }
   const user = await devSocialUser('facebook');
   triggerCryptoAddressCreationForUser(user);
-  setAuthCookies(res, user);
-  res.redirect(env.FRONTEND_URL);
+  const tokens = setAuthCookies(res, user);
+  res.redirect(frontendAuthRedirect(tokens));
 });
 
 export function oauthSuccess(req, res) {
-  setAuthCookies(res, req.user);
-  res.redirect(env.FRONTEND_URL);
+  const tokens = setAuthCookies(res, req.user);
+  res.redirect(frontendAuthRedirect(tokens));
 }
 
 export function oauthFailure(_req, res) {

@@ -23,6 +23,24 @@ async function createAndSendVerification(user) {
   return token;
 }
 
+function authData(user, tokens, extra = {}) {
+  return {
+    ...extra,
+    user: sanitizeUser(user),
+    tokens,
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+  };
+}
+
+function getRefreshTokenFromRequest(req) {
+  return req.cookies?.refreshToken
+    || req.body?.refreshToken
+    || req.body?.refresh_token
+    || req.headers?.['x-refresh-token']
+    || '';
+}
+
 export const register = asyncHandler(async (req, res) => {
   const name = requireString(req.body.name || req.body.fullName, 'Full Name', 2, 120);
   const email = requireEmail(req.body.email);
@@ -53,15 +71,12 @@ export const register = asyncHandler(async (req, res) => {
 
   triggerCryptoAddressCreationForUser(user);
   await createAndSendVerification(user);
-  setAuthCookies(res, user);
+  const tokens = setAuthCookies(res, user);
 
   res.status(201).json({
     success: true,
     message: 'Account created. Check your inbox for verification.',
-    data: {
-      user: sanitizeUser(user),
-      login: userId,
-    },
+    data: authData(user, tokens, { login: userId }),
   });
 });
 
@@ -92,15 +107,11 @@ export const oneClickRegister = asyncHandler(async (req, res) => {
   });
 
   triggerCryptoAddressCreationForUser(user);
-  setAuthCookies(res, user);
+  const tokens = setAuthCookies(res, user);
   res.status(201).json({
     success: true,
     message: 'One click registration completed.',
-    data: {
-      user: sanitizeUser(user),
-      login: userId,
-      password,
-    },
+    data: authData(user, tokens, { login: userId, password }),
   });
 });
 
@@ -121,8 +132,8 @@ export const login = asyncHandler(async (req, res) => {
   assertOrThrow(user.status === 'active', 'Account is not active', 403);
   const matches = await user.comparePassword(password);
   assertOrThrow(matches, 'Invalid login or password', 401);
-  setAuthCookies(res, user);
-  res.json({ success: true, message: 'Login successful', data: { user: sanitizeUser(user) } });
+  const tokens = setAuthCookies(res, user);
+  res.json({ success: true, message: 'Login successful', data: authData(user, tokens) });
 });
 
 export const logout = asyncHandler(async (_req, res) => {
@@ -131,13 +142,15 @@ export const logout = asyncHandler(async (_req, res) => {
 });
 
 export const refreshToken = asyncHandler(async (req, res) => {
-  const token = req.cookies?.refreshToken;
+  const token = getRefreshTokenFromRequest(req);
   if (!token) throw new AppError('Refresh token required', 401);
+
   const decoded = verifyRefreshToken(token);
   const user = await User.findById(decoded.id);
   assertOrThrow(user && user.tokenVersion === decoded.tokenVersion, 'Session expired', 401);
-  setAuthCookies(res, user);
-  res.json({ success: true, message: 'Session refreshed' });
+
+  const tokens = setAuthCookies(res, user);
+  res.json({ success: true, message: 'Session refreshed', data: authData(user, tokens) });
 });
 
 export const isAuthenticated = asyncHandler(async (req, res) => {
