@@ -272,8 +272,21 @@ function makeAuditHash({ serverSeed, clientSeed, userId, gameCode, totalBet, slo
     .digest('hex');
 }
 
+function balanceFields(wallet) {
+  const value = money(wallet);
+  return {
+    credit: value,
+    balance: value,
+    wallet: value,
+    wallet_balance: value,
+    main_balance: value,
+    available_balance: value,
+  };
+}
+
 function sessionPayload(user, token) {
   const displayCurrency = user.currency || 'BDT';
+  const balances = balanceFields(user.wallet);
 
   return {
     success: true,
@@ -281,7 +294,7 @@ function sessionPayload(user, token) {
     data: {
       token,
       user_name: user.name || user.fullName || user.username || user.userId || 'Player',
-      credit: money(user.wallet),
+      ...balances,
       num_line: 5,
       line_num: 5,
       bet_amount: MIN_BET_AMOUNT,
@@ -299,7 +312,7 @@ function sessionPayload(user, token) {
       previous_session: false,
       game_state: '',
       bet_size_list: BET_SIZE_LIST,
-      currency_prefix: `${displayCurrency} `,
+      currency_prefix: displayCurrency,
       currency_suffix: '',
       currency_thousand: ',',
       currency_decimal: '.',
@@ -316,32 +329,35 @@ function sessionPayload(user, token) {
 }
 
 function iconsPayload() {
+  const icons = [
+    { icon_name: 'Symbol_0', name: 'Symbol_0', value: 'Symbol_0' },
+    { icon_name: 'Symbol_1', name: 'Symbol_1', value: 'Symbol_1' },
+    { icon_name: 'Symbol_2', name: 'Symbol_2', value: 'Symbol_2' },
+    { icon_name: 'Symbol_3', name: 'Symbol_3', value: 'Symbol_3' },
+    { icon_name: 'Symbol_4', name: 'Symbol_4', value: 'Symbol_4' },
+    { icon_name: 'Symbol_5', name: 'Symbol_5', value: 'Symbol_5' },
+    { icon_name: 'Symbol_6', name: 'Symbol_6', value: 'Symbol_6' },
+    { icon_name: 'Scatter', name: 'scatter', value: 'scatter' },
+    { icon_name: 'Wild', name: 'wild', value: 'wild' },
+    { icon_name: 'scatter', name: 'scatter', value: 'scatter' },
+    { icon_name: 'wild', name: 'wild', value: 'wild' },
+  ];
+
   return {
     success: true,
-    data: {
-      Symbol_0: 'Symbol_0',
-      Symbol_1: 'Symbol_1',
-      Symbol_2: 'Symbol_2',
-      Symbol_3: 'Symbol_3',
-      Symbol_4: 'Symbol_4',
-      Symbol_5: 'Symbol_5',
-      Symbol_6: 'Symbol_6',
-      Scatter: 'scatter',
-      Wild: 'wild',
-      scatter: 'scatter',
-      wild: 'wild',
-    },
+    data: icons,
   };
 }
 
 function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, evaluation, slots, auditHash, plan }) {
   const isWin = evaluation.winAmount > 0;
+  const balances = balanceFields(finalWallet);
 
   return {
     success: true,
     message: 'Spin success',
     data: {
-      credit: money(finalWallet),
+      ...balances,
       freemode: false,
       jackpot: 0,
       free_spin: 0,
@@ -560,7 +576,7 @@ function historyItemFromBet(bet) {
   };
 }
 
-async function handleHistories(req, res, user, game) {
+async function handleHistories(req, res, user, game, { legacyArray = false } = {}) {
   const page = Math.max(Math.floor(numberValue(req.body?.page || req.query?.page, 1)), 1);
   const perPage = 10;
   const query = { user: user._id, game: game._id, 'gameData.source': 'vgames' };
@@ -569,6 +585,17 @@ async function handleHistories(req, res, user, game) {
     Bet.countDocuments(query),
     Bet.find(query).sort({ createdAt: -1 }).skip((page - 1) * perPage).limit(perPage),
   ]);
+
+  const mappedItems = items.map(historyItemFromBet);
+
+  // The original Construct game calls /logs and expects an ARRAY with forEach().
+  // /histories is used by the history page and expects the paginated OBJECT below.
+  if (legacyArray) {
+    return res.json({
+      success: true,
+      data: mappedItems,
+    });
+  }
 
   const [totalBetAgg, totalWinAgg] = await Promise.all([
     Bet.aggregate([{ $match: query }, { $group: { _id: null, amount: { $sum: '$betAmount' } } }]),
@@ -589,7 +616,7 @@ async function handleHistories(req, res, user, game) {
       totalPage,
       totalBet: money(totalBet),
       totalProfit: money(totalWin - totalBet),
-      items: items.map(historyItemFromBet),
+      items: mappedItems,
     },
   });
 }
@@ -678,18 +705,19 @@ export async function handleVGameAction(req, res) {
   if (action === 'rules') return res.json(rulesPayload());
   if (action === 'spin') return handleSpin(req, res, user, game);
   if (action === 'buy') return handleSpin(req, res, user, game);
-  if (action === 'histories' || action === 'logs') return handleHistories(req, res, user, game);
+  if (action === 'logs') return handleHistories(req, res, user, game, { legacyArray: true });
+  if (action === 'histories') return handleHistories(req, res, user, game);
   if (action === 'history_detail') return handleHistoryDetailAction(req, res, user, game);
   if (action === 'freenum') return res.json({ success: true, data: { free_num: 0 } });
   if (action === 'save') return res.json({ success: true, data: { saved: true } });
-  if (action === 'collect') return res.json({ success: true, data: { collected: true, credit: money(user.wallet) } });
-  if (action === 'gamble') return res.json({ success: true, data: { win_amount: 0, credit: money(user.wallet) } });
+  if (action === 'collect') return res.json({ success: true, data: { collected: true, ...balanceFields(user.wallet) } });
+  if (action === 'gamble') return res.json({ success: true, data: { win_amount: 0, ...balanceFields(user.wallet) } });
   if (action === 'linenum') return res.json({ success: true, data: { num_line: 5, line_num: 5 } });
   if (action === 'change_free') return res.json({ success: true, data: { free_num: 0 } });
   if (action === 'checklucky') return res.json({ success: true, data: 0 });
-  if (action === 'luckywheel') return res.json({ success: true, data: { credit: money(user.wallet), win_amount: 0, name: '' } });
+  if (action === 'luckywheel') return res.json({ success: true, data: { ...balanceFields(user.wallet), win_amount: 0, name: '' } });
   if (action === 'checkfree') return res.json({ success: true, data: 0 });
-  if (action === 'freecredit') return res.json({ success: true, data: { credit: money(user.wallet), win_amount: 0 } });
+  if (action === 'freecredit') return res.json({ success: true, data: { ...balanceFields(user.wallet), win_amount: 0 } });
   if (action === 'pricing') return res.json({ success: true, data: { bet_size_list: BET_SIZE_LIST } });
 
   return res.status(404).json({ success: false, message: `Unsupported action: ${action}` });
