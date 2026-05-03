@@ -69,6 +69,18 @@ const agentPaymentRequestSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  receiverNumber: {
+    type: String,
+    default: '',
+  },
+  accountNumber: {
+    type: String,
+    default: '',
+  },
+  accountHolderName: {
+    type: String,
+    default: '',
+  },
   agentNote: {
     type: String,
     default: '',
