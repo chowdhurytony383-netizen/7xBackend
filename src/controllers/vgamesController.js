@@ -25,14 +25,13 @@ const BET_SIZE_LIST = [
 const MIN_BET_AMOUNT = 0.4;
 const MAX_TOTAL_BET = 20000;
 
-// 15 icon positions are column-style. The first 9 positions are the visible 3x3 board.
-// WIN only happens when 3 same symbols appear on one of these 5 paylines.
+// First 9 positions are the visible 3x3 board.
+// WIN only happens when 3 same symbols appear on LEFT-RIGHT horizontal paylines.
+// Top-bottom / vertical and diagonal paylines are disabled.
 const PAYLINES = [
-  { lineIndex: 1, key: 'TOP_ROW', label: 'Top row', positions: [1, 4, 7] },
-  { lineIndex: 2, key: 'MIDDLE_ROW', label: 'Middle row', positions: [2, 5, 8] },
-  { lineIndex: 3, key: 'BOTTOM_ROW', label: 'Bottom row', positions: [3, 6, 9] },
-  { lineIndex: 4, key: 'DIAGONAL_DOWN', label: 'Diagonal 1', positions: [1, 5, 9] },
-  { lineIndex: 5, key: 'DIAGONAL_UP', label: 'Diagonal 2', positions: [3, 5, 7] },
+  { lineIndex: 1, key: 'TOP_ROW', label: 'Top row', positions: [1, 2, 3] },
+  { lineIndex: 2, key: 'MIDDLE_ROW', label: 'Middle row', positions: [4, 5, 6] },
+  { lineIndex: 3, key: 'BOTTOM_ROW', label: 'Bottom row', positions: [7, 8, 9] },
 ];
 
 // Symbol/card payout rule. 3 same symbols on a payline = WIN.
@@ -179,7 +178,6 @@ function buildLoseSlotIcons() {
     for (const payline of PAYLINES) {
       const symbols = getPaylineSymbols(slots, payline);
       if (!isThreeSame(symbols)) continue;
-
       const breakPosition = payline.positions[2] - 1;
       slots[breakPosition] = nextDifferentSymbol(slots[breakPosition]);
       fixedAnyLine = true;
@@ -244,9 +242,9 @@ function rulesPayload() {
   return {
     success: true,
     data: {
-      description: 'WIN only happens when 3 same symbols/cards appear on one of the listed paylines. Otherwise the result is LOSE.',
-      win_condition: '3_SAME_SYMBOLS_ON_A_PAYLINE',
-      lose_condition: 'NO_3_SAME_SYMBOLS_ON_PAYLINE',
+      description: 'WIN only happens when 3 same symbols/cards appear on one of the listed left-right paylines. Otherwise the result is LOSE.',
+      win_condition: '3_SAME_SYMBOLS_ON_LEFT_RIGHT_PAYLINE',
+      lose_condition: 'NO_3_SAME_SYMBOLS_ON_LEFT_RIGHT_PAYLINE',
       two_same_is_win: false,
       scattered_same_symbols_is_win: false,
       paylines: PAYLINES,
@@ -327,7 +325,6 @@ function sessionPayload(user, token) {
     },
   };
 }
-
 function iconsPayload() {
   const icons = [
     { icon_name: 'Symbol_0', name: 'Symbol_0', value: 'Symbol_0' },
@@ -376,8 +373,8 @@ function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, eva
       result: isWin ? 'WIN' : 'LOSE',
       audit_hash: auditHash,
       rules: {
-        win_condition: '3 same symbols/cards on one payline',
-        lose_condition: 'no matching 3-symbol payline',
+        win_condition: '3 same symbols/cards on one left-right payline',
+        lose_condition: 'no matching 3-symbol left-right payline',
         selected_payline: plan.payline?.key || null,
         selected_symbol: plan.symbol || null,
       },
@@ -394,7 +391,7 @@ function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, eva
         MultiplyCount: evaluation.totalMultiplier || 0,
         WinLogs: isWin
           ? evaluation.activeLines.map((line) => `[WIN] ${line.symbol_label} on ${line.line_label}: ${line.payout}x => ${line.win_amount}`)
-          : ['[LOSE] No 3 same symbols/cards on any payline'],
+          : ['[LOSE] No 3 same symbols/cards on any left-right payline'],
         DropLine: 0,
         MultipleList: evaluation.activeLines.map((line) => line.payout),
         WinAmount: evaluation.winAmount,
@@ -494,7 +491,6 @@ async function handleSpin(req, res, user, game) {
   if (evaluation.winAmount > 0) {
     finalUser = await User.findByIdAndUpdate(user._id, { $inc: { wallet: evaluation.winAmount } }, { new: true });
   }
-
   await Bet.create({
     user: user._id,
     game: game._id,
@@ -518,8 +514,8 @@ async function handleSpin(req, res, user, game) {
       activeIcons: evaluation.activeIcons,
       activeLines: evaluation.activeLines,
       ruleSummary: {
-        win: '3 same symbols/cards on positions [1,4,7], [2,5,8], [3,6,9], [1,5,9], or [3,5,7]',
-        lose: 'no 3 same symbols/cards on those paylines',
+        win: '3 same symbols/cards on positions [1,2,3], [4,5,6], or [7,8,9]',
+        lose: 'no 3 same symbols/cards on those left-right paylines',
       },
       symbolRules: SYMBOL_RULES,
       paylines: PAYLINES,
