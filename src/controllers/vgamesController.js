@@ -6,6 +6,7 @@ import Bet from '../models/Bet.js';
 import { env } from '../config/env.js';
 
 const SLOT_SYMBOLS = ['Symbol_1', 'Symbol_2', 'Symbol_3', 'Symbol_4', 'Symbol_5', 'Symbol_6'];
+const WILD_SYMBOLS = new Set(['Symbol_0', 'Wild', 'wild']);
 const SLOT_COUNT = 15;
 const DEFAULT_ICON_DATA = [
   'Symbol_2', 'Symbol_1', 'Symbol_3',
@@ -26,13 +27,16 @@ const MIN_BET_AMOUNT = 0.4;
 const MAX_TOTAL_BET = 20000;
 
 // 15 icon positions are column-style. The first 9 positions are the visible 3x3 board.
-// Active WIN paylines:
-// - Left-right horizontal rows: [1,4,7], [2,5,8], [3,6,9]
-// - X / diagonal rows: [1,5,9], [3,5,7]
-// Disabled: top-bottom vertical columns: [1,2,3], [4,5,6], [7,8,9]
+// These 5 fixed paylines are matched to the Fortune Tiger paytable screenshot:
+// 01 = middle horizontal [2,5,8]
+// 02 = top horizontal [1,4,7]
+// 03 = bottom horizontal [3,6,9]
+// 04 = diagonal down [1,5,9]
+// 05 = diagonal up [3,5,7]
+// Disabled: top-bottom vertical columns [1,2,3], [4,5,6], [7,8,9].
 const PAYLINES = [
-  { lineIndex: 1, key: 'TOP_ROW', label: 'Top row', positions: [1, 4, 7] },
-  { lineIndex: 2, key: 'MIDDLE_ROW', label: 'Middle row', positions: [2, 5, 8] },
+  { lineIndex: 1, key: 'MIDDLE_ROW', label: 'Middle row', positions: [2, 5, 8] },
+  { lineIndex: 2, key: 'TOP_ROW', label: 'Top row', positions: [1, 4, 7] },
   { lineIndex: 3, key: 'BOTTOM_ROW', label: 'Bottom row', positions: [3, 6, 9] },
   { lineIndex: 4, key: 'DIAGONAL_DOWN', label: 'Diagonal 1', positions: [1, 5, 9] },
   { lineIndex: 5, key: 'DIAGONAL_UP', label: 'Diagonal 2', positions: [3, 5, 7] },
@@ -125,27 +129,56 @@ function getPaylineSymbols(slots, payline) {
   return payline.positions.map((position) => slots[position - 1]);
 }
 
+function isWildSymbol(symbol) {
+  return WILD_SYMBOLS.has(symbol);
+}
+
+function getBestPaylineWin(symbols) {
+  if (symbols.length !== 3 || symbols.some((symbol) => !symbol)) return null;
+
+  const fixedSymbols = symbols.filter((symbol) => !isWildSymbol(symbol));
+  const uniqueFixedSymbols = Array.from(new Set(fixedSymbols));
+
+  // A line with two different real symbols is not a win, even if one slot is Wild.
+  if (uniqueFixedSymbols.length > 1) return null;
+
+  let winningSymbol = uniqueFixedSymbols[0];
+
+  // If the full line is Wild, pay the highest available symbol rule for that line.
+  if (!winningSymbol) {
+    winningSymbol = Object.entries(SYMBOL_RULES)
+      .sort(([, a], [, b]) => b.multiplier - a.multiplier)[0][0];
+  }
+
+  const rule = SYMBOL_RULES[winningSymbol];
+  if (!rule) return null;
+
+  return {
+    symbol: winningSymbol,
+    rule,
+    hasWild: symbols.some((symbol) => isWildSymbol(symbol)),
+  };
+}
+
 function isThreeSame(symbols) {
-  return symbols.length === 3 && symbols[0] && symbols[0] === symbols[1] && symbols[1] === symbols[2];
+  return Boolean(getBestPaylineWin(symbols));
 }
 
 function evaluateSlotIcons(slots, totalBet) {
   const activeLines = [];
   const activeIcons = new Set();
-  let winAmount = 0;
-  let totalMultiplier = 0;
+  let baseWinAmount = 0;
+  let baseMultiplier = 0;
 
   for (const payline of PAYLINES) {
     const lineSymbols = getPaylineSymbols(slots, payline);
-    if (!isThreeSame(lineSymbols)) continue;
+    const winInfo = getBestPaylineWin(lineSymbols);
+    if (!winInfo) continue;
 
-    const symbol = lineSymbols[0];
-    const rule = SYMBOL_RULES[symbol];
-    if (!rule) continue;
-
+    const { symbol, rule, hasWild } = winInfo;
     const lineWin = money(totalBet * rule.multiplier);
-    winAmount = money(winAmount + lineWin);
-    totalMultiplier = money(totalMultiplier + rule.multiplier);
+    baseWinAmount = money(baseWinAmount + lineWin);
+    baseMultiplier = money(baseMultiplier + rule.multiplier);
 
     for (const position of payline.positions) activeIcons.add(position);
 
@@ -161,19 +194,42 @@ function evaluateSlotIcons(slots, totalBet) {
       way_243: 1,
       multiply: 0,
       win_amount: lineWin,
+      base_win_amount: lineWin,
+      x10_multiplier: false,
+      has_wild: hasWild,
+      raw_symbols: lineSymbols,
       active_icon: payline.positions,
     });
   }
 
+  // Paytable x10 rule: when all 9 visible symbols are involved in a win,
+  // the total win is multiplied by x10.
+  const allVisibleIconsInvolved = activeIcons.size >= 9;
+  const x10MultiplierApplied = baseWinAmount > 0 && allVisibleIconsInvolved;
+
+  if (x10MultiplierApplied) {
+    for (const line of activeLines) {
+      line.x10_multiplier = true;
+      line.win_amount = money(line.win_amount * 10);
+    }
+  }
+
+  const winAmount = x10MultiplierApplied ? money(baseWinAmount * 10) : baseWinAmount;
+  const totalMultiplier = x10MultiplierApplied ? money(baseMultiplier * 10) : baseMultiplier;
+
   let winType = 'LOSE';
   if (winAmount > 0) {
-    winType = activeLines.length >= 2 || totalMultiplier >= 10 ? 'BIG_WIN' : 'WIN';
+    winType = x10MultiplierApplied || activeLines.length >= 2 || totalMultiplier >= 10 ? 'BIG_WIN' : 'WIN';
   }
 
   return {
     isWin: winAmount > 0,
     winAmount,
     totalMultiplier,
+    baseWinAmount,
+    baseMultiplier,
+    x10MultiplierApplied,
+    allVisibleIconsInvolved,
     activeIcons: Array.from(activeIcons).sort((a, b) => a - b),
     activeLines,
     winType,
@@ -278,17 +334,16 @@ function buildWinSlotIcons({ payline, symbol }) {
   return repairExtraWinningLines(slots, payline);
 }
 
-function buildBigWinSlotIcons({ paylines, symbol }) {
+function buildBigWinSlotIcons({ symbol }) {
   const slots = buildLoseSlotIcons();
 
-  // BIG WIN condition: two or more active paylines become the same selected symbol/card.
-  for (const payline of paylines) {
-    for (const position of payline.positions) {
-      slots[position - 1] = symbol;
-    }
+  // Exact paytable-style BIG WIN / x10 setup:
+  // all 9 visible symbols are part of winning paylines.
+  for (let position = 1; position <= 9; position += 1) {
+    slots[position - 1] = symbol;
   }
 
-  return repairUnexpectedWinningLines(slots, paylines);
+  return slots;
 }
 
 function pickSpinPlan(isDemoMode = false) {
@@ -300,11 +355,10 @@ function pickSpinPlan(isDemoMode = false) {
   }
 
   if (outcome.type === 'BIG_WIN') {
-    const paylines = pickTwoDistinctPaylines();
     return {
       type: 'BIG_WIN',
-      payline: paylines[0],
-      paylines,
+      payline: PAYLINES[0],
+      paylines: PAYLINES,
       symbol: weightedPick(WIN_SYMBOL_WEIGHTS).symbol,
     };
   }
@@ -322,21 +376,29 @@ function rulesPayload() {
   return {
     success: true,
     data: {
-      description: 'WIN happens when 3 same symbols/cards appear on any left-right horizontal payline or X/diagonal payline. Top-bottom vertical paylines are disabled.',
-      win_condition: '3_SAME_SYMBOLS_ON_HORIZONTAL_OR_X_DIAGONAL_PAYLINE',
-      lose_condition: 'NO_3_SAME_SYMBOLS_ON_HORIZONTAL_OR_X_DIAGONAL_PAYLINE',
+      description: 'Fortune Tiger style 3-reel, 3-row slot rules: 5 fixed bet lines, leftmost reel to right wins, simultaneous line wins are added, Wild substitutes for all symbols, and x10 applies when all 9 visible symbols are involved in a win.',
+      game_type: '3_REEL_3_ROW_FIXED_5_LINES',
+      win_condition: '3_SAME_OR_WILD_SUBSTITUTED_SYMBOLS_FROM_LEFTMOST_REEL_TO_RIGHT_ON_ACTIVE_PAYLINE',
+      lose_condition: 'NO_MATCHING_3_SYMBOL_ACTIVE_PAYLINE',
       two_same_is_win: false,
       scattered_same_symbols_is_win: false,
       vertical_top_bottom_is_win: false,
+      only_highest_win_per_bet_line_is_paid: true,
+      simultaneous_wins_are_added: true,
+      wild_substitutes_for_all_symbols: true,
       paylines: PAYLINES,
       disabled_paylines: [
         { key: 'LEFT_COLUMN_VERTICAL', label: 'Left column vertical', positions: [1, 2, 3] },
         { key: 'MIDDLE_COLUMN_VERTICAL', label: 'Middle column vertical', positions: [4, 5, 6] },
         { key: 'RIGHT_COLUMN_VERTICAL', label: 'Right column vertical', positions: [7, 8, 9] },
       ],
+      x10_multiplier_rule: {
+        description: 'When all 9 visible symbols in the reels are involved in winning paylines, the total win is multiplied by x10.',
+        condition: 'ALL_9_VISIBLE_POSITIONS_ACTIVE_IN_WINNING_PAYLINES',
+      },
       big_win_rules: {
-        description: 'BIG WIN happens when 2 or more active paylines win in one spin, or total multiplier is 10x or more.',
-        conditions: ['2_OR_MORE_PAYLINES', 'TOTAL_MULTIPLIER_GTE_10'],
+        description: 'BIG WIN is used when x10 is applied, or when 2 or more active paylines win in one spin, or when total multiplier is 10x or more.',
+        conditions: ['X10_MULTIPLIER_APPLIED', '2_OR_MORE_PAYLINES', 'TOTAL_MULTIPLIER_GTE_10'],
       },
       symbol_rules: Object.entries(SYMBOL_RULES).map(([symbol, rule]) => ({
         symbol,
@@ -470,7 +532,10 @@ function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, eva
       rules: {
         win_condition: '3 same symbols/cards on one horizontal left-right payline or one X/diagonal payline',
         lose_condition: 'no matching 3-symbol horizontal or X/diagonal payline',
-        big_win_condition: '2 or more active paylines win, or total multiplier is 10x or more',
+        big_win_condition: 'x10 applied, 2 or more active paylines win, or total multiplier is 10x or more',
+        x10_multiplier_condition: 'all 9 visible symbols are involved in winning paylines',
+        x10_multiplier_applied: evaluation.x10MultiplierApplied,
+        all_visible_icons_involved: evaluation.allVisibleIconsInvolved,
         vertical_top_bottom_is_win: false,
         selected_payline: plan.payline?.key || null,
         selected_paylines: selectedPaylines,
@@ -487,6 +552,9 @@ function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, eva
         WildColumIcon: '',
         MultipyScatter: 0,
         MultiplyCount: evaluation.totalMultiplier || 0,
+        BaseMultiplyCount: evaluation.baseMultiplier || 0,
+        X10Multiplier: evaluation.x10MultiplierApplied,
+        AllVisibleIconsInvolved: evaluation.allVisibleIconsInvolved,
         WinLogs: isWin
           ? evaluation.activeLines.map((line) => `[${evaluation.winType}] ${line.symbol_label} on ${line.line_label}: ${line.payout}x => ${line.win_amount}`)
           : ['[LOSE] No 3 same symbols/cards on any horizontal or X/diagonal payline'],
@@ -557,7 +625,7 @@ async function handleSpin(req, res, user, game) {
   let slots;
 
   if (plan.type === 'BIG_WIN') {
-    slots = buildBigWinSlotIcons({ paylines: plan.paylines, symbol: plan.symbol });
+    slots = buildBigWinSlotIcons({ symbol: plan.symbol });
   } else if (plan.type === 'WIN') {
     slots = buildWinSlotIcons({ payline: plan.payline, symbol: plan.symbol });
   } else {
@@ -580,7 +648,7 @@ async function handleSpin(req, res, user, game) {
 
   // Safety guard: a forced big win must always produce BIG_WIN.
   if (plan.type === 'BIG_WIN' && evaluation.winType !== 'BIG_WIN') {
-    slots = buildBigWinSlotIcons({ paylines: plan.paylines, symbol: plan.symbol });
+    slots = buildBigWinSlotIcons({ symbol: plan.symbol });
     evaluation = evaluateSlotIcons(slots, totalBet);
   }
 
@@ -619,6 +687,10 @@ async function handleSpin(req, res, user, game) {
       selectedPaylines: plan.paylines?.map((payline) => payline.key) || [],
       selectedSymbol: plan.symbol || null,
       totalMultiplier: evaluation.totalMultiplier,
+      baseMultiplier: evaluation.baseMultiplier,
+      baseWinAmount: evaluation.baseWinAmount,
+      x10MultiplierApplied: evaluation.x10MultiplierApplied,
+      allVisibleIconsInvolved: evaluation.allVisibleIconsInvolved,
       cpl,
       betamount: betAmountRaw,
       numLine,
@@ -627,10 +699,13 @@ async function handleSpin(req, res, user, game) {
       activeIcons: evaluation.activeIcons,
       activeLines: evaluation.activeLines,
       ruleSummary: {
-        win: '3 same symbols/cards on positions [1,4,7], [2,5,8], [3,6,9], [1,5,9], or [3,5,7]',
-        lose: 'no 3 same symbols/cards on those horizontal or X/diagonal paylines',
+        win: '5 fixed lines exactly like paytable: 01 [2,5,8], 02 [1,4,7], 03 [3,6,9], 04 [1,5,9], 05 [3,5,7]',
+        lose: 'no 3 same or Wild-substituted symbols from the leftmost reel to the right on those active paylines',
+        wild: 'Wild/Symbol_0 substitutes for all symbols',
+        simultaneous_wins: 'simultaneous wins on different bet lines are added',
+        x10_multiplier: 'when all 9 visible symbols are involved in winning paylines, total win is multiplied by x10',
         vertical_top_bottom: 'positions [1,2,3], [4,5,6], and [7,8,9] are disabled and do not count as win',
-        big_win: '2 or more active paylines win in one spin, or total multiplier is 10x or more',
+        big_win: 'x10 applied, 2 or more active paylines win in one spin, or total multiplier is 10x or more',
       },
       symbolRules: SYMBOL_RULES,
       paylines: PAYLINES,
