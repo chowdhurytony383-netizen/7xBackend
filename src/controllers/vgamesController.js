@@ -25,13 +25,17 @@ const BET_SIZE_LIST = [
 const MIN_BET_AMOUNT = 0.4;
 const MAX_TOTAL_BET = 20000;
 
-// First 9 positions are the visible 3x3 board.
-// WIN only happens when 3 same symbols appear on LEFT-RIGHT horizontal paylines.
-// Top-bottom / vertical and diagonal paylines are disabled.
+// 15 icon positions are column-style. The first 9 positions are the visible 3x3 board.
+// Active WIN paylines:
+// - Left-right horizontal rows: [1,4,7], [2,5,8], [3,6,9]
+// - X / diagonal rows: [1,5,9], [3,5,7]
+// Disabled: top-bottom vertical columns: [1,2,3], [4,5,6], [7,8,9]
 const PAYLINES = [
-  { lineIndex: 1, key: 'TOP_ROW', label: 'Top row', positions: [1, 2, 3] },
-  { lineIndex: 2, key: 'MIDDLE_ROW', label: 'Middle row', positions: [4, 5, 6] },
-  { lineIndex: 3, key: 'BOTTOM_ROW', label: 'Bottom row', positions: [7, 8, 9] },
+  { lineIndex: 1, key: 'TOP_ROW', label: 'Top row', positions: [1, 4, 7] },
+  { lineIndex: 2, key: 'MIDDLE_ROW', label: 'Middle row', positions: [2, 5, 8] },
+  { lineIndex: 3, key: 'BOTTOM_ROW', label: 'Bottom row', positions: [3, 6, 9] },
+  { lineIndex: 4, key: 'DIAGONAL_DOWN', label: 'Diagonal 1', positions: [1, 5, 9] },
+  { lineIndex: 5, key: 'DIAGONAL_UP', label: 'Diagonal 2', positions: [3, 5, 7] },
 ];
 
 // Symbol/card payout rule. 3 same symbols on a payline = WIN.
@@ -47,12 +51,14 @@ const SYMBOL_RULES = {
 // Overall spin decision. The visible board is still generated from the exact rules above.
 const LIVE_SPIN_WEIGHTS = [
   { type: 'LOSE', weight: 6500 },
-  { type: 'WIN', weight: 3500 },
+  { type: 'WIN', weight: 3000 },
+  { type: 'BIG_WIN', weight: 500 },
 ];
 
 const DEMO_SPIN_WEIGHTS = [
   { type: 'LOSE', weight: 5000 },
-  { type: 'WIN', weight: 5000 },
+  { type: 'WIN', weight: 4200 },
+  { type: 'BIG_WIN', weight: 800 },
 ];
 
 // Higher payout cards appear less often.
@@ -159,12 +165,18 @@ function evaluateSlotIcons(slots, totalBet) {
     });
   }
 
+  let winType = 'LOSE';
+  if (winAmount > 0) {
+    winType = activeLines.length >= 2 || totalMultiplier >= 10 ? 'BIG_WIN' : 'WIN';
+  }
+
   return {
     isWin: winAmount > 0,
     winAmount,
     totalMultiplier,
     activeIcons: Array.from(activeIcons).sort((a, b) => a - b),
     activeLines,
+    winType,
   };
 }
 
@@ -178,6 +190,7 @@ function buildLoseSlotIcons() {
     for (const payline of PAYLINES) {
       const symbols = getPaylineSymbols(slots, payline);
       if (!isThreeSame(symbols)) continue;
+
       const breakPosition = payline.positions[2] - 1;
       slots[breakPosition] = nextDifferentSymbol(slots[breakPosition]);
       fixedAnyLine = true;
@@ -212,6 +225,48 @@ function repairExtraWinningLines(slots, targetPayline) {
   return slots;
 }
 
+function repairUnexpectedWinningLines(slots, targetPaylines) {
+  const targetKeys = new Set(targetPaylines.map((payline) => payline.key));
+  const protectedPositions = new Set(targetPaylines.flatMap((payline) => payline.positions));
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    let repaired = false;
+
+    for (const payline of PAYLINES) {
+      if (targetKeys.has(payline.key)) continue;
+
+      const symbols = getPaylineSymbols(slots, payline);
+      if (!isThreeSame(symbols)) continue;
+
+      const breakPosition = payline.positions.find((position) => !protectedPositions.has(position));
+      if (!breakPosition) continue;
+
+      slots[breakPosition - 1] = nextDifferentSymbol(slots[breakPosition - 1]);
+      repaired = true;
+    }
+
+    if (!repaired) break;
+  }
+
+  return slots;
+}
+
+function pickTwoDistinctPaylines() {
+  const first = pick(PAYLINES);
+  let second = pick(PAYLINES);
+
+  for (let attempt = 0; attempt < 10 && second.key === first.key; attempt += 1) {
+    second = pick(PAYLINES);
+  }
+
+  if (second.key === first.key) {
+    const firstIndex = PAYLINES.findIndex((payline) => payline.key === first.key);
+    second = PAYLINES[(firstIndex + 1) % PAYLINES.length];
+  }
+
+  return [first, second];
+}
+
 function buildWinSlotIcons({ payline, symbol }) {
   const slots = buildLoseSlotIcons();
 
@@ -223,17 +278,42 @@ function buildWinSlotIcons({ payline, symbol }) {
   return repairExtraWinningLines(slots, payline);
 }
 
+function buildBigWinSlotIcons({ paylines, symbol }) {
+  const slots = buildLoseSlotIcons();
+
+  // BIG WIN condition: two or more active paylines become the same selected symbol/card.
+  for (const payline of paylines) {
+    for (const position of payline.positions) {
+      slots[position - 1] = symbol;
+    }
+  }
+
+  return repairUnexpectedWinningLines(slots, paylines);
+}
+
 function pickSpinPlan(isDemoMode = false) {
   const spinTable = isDemoMode ? DEMO_SPIN_WEIGHTS : LIVE_SPIN_WEIGHTS;
   const outcome = weightedPick(spinTable);
 
   if (outcome.type === 'LOSE') {
-    return { type: 'LOSE', payline: null, symbol: null };
+    return { type: 'LOSE', payline: null, paylines: [], symbol: null };
   }
 
+  if (outcome.type === 'BIG_WIN') {
+    const paylines = pickTwoDistinctPaylines();
+    return {
+      type: 'BIG_WIN',
+      payline: paylines[0],
+      paylines,
+      symbol: weightedPick(WIN_SYMBOL_WEIGHTS).symbol,
+    };
+  }
+
+  const payline = pick(PAYLINES);
   return {
     type: 'WIN',
-    payline: pick(PAYLINES),
+    payline,
+    paylines: [payline],
     symbol: weightedPick(WIN_SYMBOL_WEIGHTS).symbol,
   };
 }
@@ -242,17 +322,27 @@ function rulesPayload() {
   return {
     success: true,
     data: {
-      description: 'WIN only happens when 3 same symbols/cards appear on one of the listed left-right paylines. Otherwise the result is LOSE.',
-      win_condition: '3_SAME_SYMBOLS_ON_LEFT_RIGHT_PAYLINE',
-      lose_condition: 'NO_3_SAME_SYMBOLS_ON_LEFT_RIGHT_PAYLINE',
+      description: 'WIN happens when 3 same symbols/cards appear on any left-right horizontal payline or X/diagonal payline. Top-bottom vertical paylines are disabled.',
+      win_condition: '3_SAME_SYMBOLS_ON_HORIZONTAL_OR_X_DIAGONAL_PAYLINE',
+      lose_condition: 'NO_3_SAME_SYMBOLS_ON_HORIZONTAL_OR_X_DIAGONAL_PAYLINE',
       two_same_is_win: false,
       scattered_same_symbols_is_win: false,
+      vertical_top_bottom_is_win: false,
       paylines: PAYLINES,
+      disabled_paylines: [
+        { key: 'LEFT_COLUMN_VERTICAL', label: 'Left column vertical', positions: [1, 2, 3] },
+        { key: 'MIDDLE_COLUMN_VERTICAL', label: 'Middle column vertical', positions: [4, 5, 6] },
+        { key: 'RIGHT_COLUMN_VERTICAL', label: 'Right column vertical', positions: [7, 8, 9] },
+      ],
+      big_win_rules: {
+        description: 'BIG WIN happens when 2 or more active paylines win in one spin, or total multiplier is 10x or more.',
+        conditions: ['2_OR_MORE_PAYLINES', 'TOTAL_MULTIPLIER_GTE_10'],
+      },
       symbol_rules: Object.entries(SYMBOL_RULES).map(([symbol, rule]) => ({
         symbol,
         label: rule.label,
         multiplier: rule.multiplier,
-        example: `${symbol} + ${symbol} + ${symbol} on any payline = WIN ${rule.multiplier}x`,
+        example: `${symbol} + ${symbol} + ${symbol} on any active payline = WIN ${rule.multiplier}x`,
       })),
     },
   };
@@ -325,6 +415,7 @@ function sessionPayload(user, token) {
     },
   };
 }
+
 function iconsPayload() {
   const icons = [
     { icon_name: 'Symbol_0', name: 'Symbol_0', value: 'Symbol_0' },
@@ -349,6 +440,7 @@ function iconsPayload() {
 function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, evaluation, slots, auditHash, plan }) {
   const isWin = evaluation.winAmount > 0;
   const balances = balanceFields(finalWallet);
+  const selectedPaylines = plan.paylines?.map((payline) => payline.key) || [];
 
   return {
     success: true,
@@ -371,11 +463,17 @@ function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, eva
       profit: money(evaluation.winAmount - totalBet),
       balance: money(finalWallet),
       result: isWin ? 'WIN' : 'LOSE',
+      win_type: evaluation.winType,
+      display_result: evaluation.winType,
+      big_win: evaluation.winType === 'BIG_WIN',
       audit_hash: auditHash,
       rules: {
-        win_condition: '3 same symbols/cards on one left-right payline',
-        lose_condition: 'no matching 3-symbol left-right payline',
+        win_condition: '3 same symbols/cards on one horizontal left-right payline or one X/diagonal payline',
+        lose_condition: 'no matching 3-symbol horizontal or X/diagonal payline',
+        big_win_condition: '2 or more active paylines win, or total multiplier is 10x or more',
+        vertical_top_bottom_is_win: false,
         selected_payline: plan.payline?.key || null,
+        selected_paylines: selectedPaylines,
         selected_symbol: plan.symbol || null,
       },
       pull: {
@@ -390,8 +488,8 @@ function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, eva
         MultipyScatter: 0,
         MultiplyCount: evaluation.totalMultiplier || 0,
         WinLogs: isWin
-          ? evaluation.activeLines.map((line) => `[WIN] ${line.symbol_label} on ${line.line_label}: ${line.payout}x => ${line.win_amount}`)
-          : ['[LOSE] No 3 same symbols/cards on any left-right payline'],
+          ? evaluation.activeLines.map((line) => `[${evaluation.winType}] ${line.symbol_label} on ${line.line_label}: ${line.payout}x => ${line.win_amount}`)
+          : ['[LOSE] No 3 same symbols/cards on any horizontal or X/diagonal payline'],
         DropLine: 0,
         MultipleList: evaluation.activeLines.map((line) => line.payout),
         WinAmount: evaluation.winAmount,
@@ -456,9 +554,15 @@ async function handleSpin(req, res, user, game) {
   }
 
   const plan = pickSpinPlan(Boolean(user.is_demo_agent || user.isDemo || user.demoMode));
-  let slots = plan.type === 'WIN'
-    ? buildWinSlotIcons({ payline: plan.payline, symbol: plan.symbol })
-    : buildLoseSlotIcons();
+  let slots;
+
+  if (plan.type === 'BIG_WIN') {
+    slots = buildBigWinSlotIcons({ paylines: plan.paylines, symbol: plan.symbol });
+  } else if (plan.type === 'WIN') {
+    slots = buildWinSlotIcons({ payline: plan.payline, symbol: plan.symbol });
+  } else {
+    slots = buildLoseSlotIcons();
+  }
 
   let evaluation = evaluateSlotIcons(slots, totalBet);
 
@@ -471,6 +575,12 @@ async function handleSpin(req, res, user, game) {
   // Safety guard: a forced win must always create a valid 3-same payline.
   if (plan.type === 'WIN' && !evaluation.isWin) {
     slots = buildWinSlotIcons({ payline: plan.payline, symbol: plan.symbol });
+    evaluation = evaluateSlotIcons(slots, totalBet);
+  }
+
+  // Safety guard: a forced big win must always produce BIG_WIN.
+  if (plan.type === 'BIG_WIN' && evaluation.winType !== 'BIG_WIN') {
+    slots = buildBigWinSlotIcons({ paylines: plan.paylines, symbol: plan.symbol });
     evaluation = evaluateSlotIcons(slots, totalBet);
   }
 
@@ -491,6 +601,7 @@ async function handleSpin(req, res, user, game) {
   if (evaluation.winAmount > 0) {
     finalUser = await User.findByIdAndUpdate(user._id, { $inc: { wallet: evaluation.winAmount } }, { new: true });
   }
+
   await Bet.create({
     user: user._id,
     game: game._id,
@@ -501,9 +612,11 @@ async function handleSpin(req, res, user, game) {
     status: evaluation.isWin ? 'WIN' : 'LOSE',
     gameData: {
       source: 'vgames',
-      engine: 'payline-symbol-rules-v3',
-      outcome: evaluation.isWin ? 'WIN' : 'LOSE',
+      engine: 'payline-symbol-rules-v4-horizontal-x-bigwin',
+      outcome: evaluation.winType,
+      winType: evaluation.winType,
       selectedPayline: plan.payline?.key || null,
+      selectedPaylines: plan.paylines?.map((payline) => payline.key) || [],
       selectedSymbol: plan.symbol || null,
       totalMultiplier: evaluation.totalMultiplier,
       cpl,
@@ -514,8 +627,10 @@ async function handleSpin(req, res, user, game) {
       activeIcons: evaluation.activeIcons,
       activeLines: evaluation.activeLines,
       ruleSummary: {
-        win: '3 same symbols/cards on positions [1,2,3], [4,5,6], or [7,8,9]',
-        lose: 'no 3 same symbols/cards on those left-right paylines',
+        win: '3 same symbols/cards on positions [1,4,7], [2,5,8], [3,6,9], [1,5,9], or [3,5,7]',
+        lose: 'no 3 same symbols/cards on those horizontal or X/diagonal paylines',
+        vertical_top_bottom: 'positions [1,2,3], [4,5,6], and [7,8,9] are disabled and do not count as win',
+        big_win: '2 or more active paylines win in one spin, or total multiplier is 10x or more',
       },
       symbolRules: SYMBOL_RULES,
       paylines: PAYLINES,
@@ -552,13 +667,14 @@ function historyItemFromBet(bet) {
   const { date, time } = formatDateParts(bet.createdAt);
   const totalMultiplier = bet.gameData?.totalMultiplier || bet.gameData?.multiplier || 0;
   const balanceAfter = bet.gameData?.balanceAfter ?? 0;
+  const result = bet.gameData?.winType || bet.gameData?.outcome || (bet.isWin ? 'WIN' : 'LOSE');
 
   return {
     id: bet._id.toString(),
     spin_date: date,
     spin_hour: time,
     transaction: bet._id.toString(),
-    result: bet.isWin ? 'WIN' : 'LOSE',
+    result,
     total_bet: money(bet.betAmount),
     win_amount: money(bet.winAmount),
     credit_line: bet.gameData?.cpl || 1,
@@ -628,15 +744,17 @@ function historyDetailFromBet(bet) {
     slotIcons.slice(12, 15),
   ];
 
+  const result = bet.gameData?.winType || bet.gameData?.outcome || (bet.isWin ? 'WIN' : 'LOSE');
+
   return {
     success: true,
     data: {
       spin_date: date,
       spin_hour: time,
       result_data: [{
-        spin_title: bet.isWin ? 'Win Result' : 'Lose Result',
+        spin_title: result === 'BIG_WIN' ? 'Big Win Result' : bet.isWin ? 'Win Result' : 'Lose Result',
         transaction: bet._id.toString(),
-        result: bet.isWin ? 'WIN' : 'LOSE',
+        result,
         total_bet: money(bet.betAmount),
         win_amount: money(bet.winAmount),
         profit: money((bet.winAmount || 0) - (bet.betAmount || 0)),
