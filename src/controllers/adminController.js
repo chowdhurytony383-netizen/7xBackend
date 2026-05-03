@@ -27,6 +27,9 @@ function queryFilter(req, type) {
       { razorpayPayoutId: search },
       { upiId: search },
       { accountNumber: search },
+      { accountHolderName: search },
+      { agentId: search },
+      { methodKey: search },
     ];
   }
   return filter;
@@ -155,7 +158,14 @@ async function updateTransactionStatus(req, res, expectedType) {
   }
 
   if (expectedType === 'WITHDRAW' && ['REJECTED', 'FAILED', 'CANCELLED'].includes(status) && !['REJECTED', 'FAILED', 'CANCELLED'].includes(prevStatus)) {
-    await creditWallet(transaction.user, transaction.amount, 'withdraw-refund');
+    const gatewayPayload = { ...(transaction.gatewayPayload || {}) };
+    if (gatewayPayload.walletHeld === true && gatewayPayload.walletRefunded !== true) {
+      await creditWallet(transaction.user, transaction.amount, 'withdraw-refund');
+      gatewayPayload.walletRefunded = true;
+      gatewayPayload.walletRefundedAt = new Date();
+      transaction.gatewayPayload = gatewayPayload;
+      await transaction.save();
+    }
   }
 
   res.json({ success: true, message: 'Transaction status updated', data: transaction });

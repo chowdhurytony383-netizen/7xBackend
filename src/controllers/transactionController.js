@@ -28,7 +28,7 @@ export const createWithdrawTransaction = asyncHandler(async (req, res) => {
   assertOrThrow(type === 'WITHDRAW', 'Only WITHDRAW transactions can be created here', 400);
   const method = optionalString(req.body.method, 40) || 'upi';
 
-  await debitWallet(req.user._id, amount, 'withdraw-request');
+  await debitWallet(req.user._id, amount, 'withdraw-request-hold');
 
   const transaction = await Transaction.create({
     user: req.user._id,
@@ -40,6 +40,11 @@ export const createWithdrawTransaction = asyncHandler(async (req, res) => {
     accountHolderName: optionalString(req.body.accountHolderName, 160),
     accountNumber: optionalString(req.body.accountNumber, 80),
     ifscCode: optionalString(req.body.ifscCode, 40),
+    gatewayPayload: {
+      source: 'legacy-withdraw',
+      walletHeld: true,
+      walletHeldAt: new Date(),
+    },
   });
 
   res.status(201).json({ success: true, message: 'Withdrawal request created', transactionId: transaction._id, data: transaction });
@@ -234,6 +239,64 @@ export const getAgentDepositOptions = asyncHandler(async (_req, res) => {
 });
 
 
+export const getAgentWithdrawOptions = asyncHandler(async (_req, res) => {
+  const globalMethods = await getGlobalDepositMethods(true);
+  const methodGroups = groupDepositMethodsByTitle(globalMethods);
+  const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(500);
+
+  const options = [];
+
+  for (const group of methodGroups) {
+    const primaryMethod = pickPrimaryDepositMethod(group.methods);
+    if (!primaryMethod) continue;
+
+    const eligibleOptions = [];
+
+    for (const method of group.methods) {
+      for (const agent of agents) {
+        if (!isPaymentMethodAssignedToAgent(agent, method.key, globalMethods)) continue;
+
+        const methods = normalizeAgentPaymentMethods(agent, globalMethods);
+        const payment = methods.find((item) => item.key === method.key && item.isActive);
+
+        if (!payment) continue;
+
+        eligibleOptions.push({
+          agent,
+          payment,
+          globalMethod: method,
+        });
+      }
+    }
+
+    const selected = pickRandomItem(eligibleOptions);
+    if (!selected) continue;
+
+    const { agent: selectedAgent, payment: selectedPayment, globalMethod: selectedGlobalMethod } = selected;
+
+    options.push({
+      id: `withdraw-${group.canonicalKey}`,
+      groupKey: group.canonicalKey,
+      agentId: selectedAgent.agentId,
+      agentName: selectedAgent.name,
+      methodKey: selectedPayment.key,
+      selectedMethodKey: selectedPayment.key,
+      methodTitle: primaryMethod.title || selectedGlobalMethod.title,
+      category: primaryMethod.category || selectedGlobalMethod.category || 'e-wallets',
+      image: primaryMethod.image || selectedGlobalMethod.image || '',
+      minAmount: primaryMethod.minAmount || selectedGlobalMethod.minAmount || 100,
+      maxAmount: primaryMethod.maxAmount || selectedGlobalMethod.maxAmount || 25000,
+      displayOrder: primaryMethod.displayOrder || selectedGlobalMethod.displayOrder || 100,
+      availableAgentCount: eligibleOptions.length,
+      duplicateMethodCount: group.methods.length,
+      duplicateKeys: group.duplicateKeys || [],
+      selectionMode: 'random-agent-withdraw',
+    });
+  }
+
+  res.json({ success: true, data: options, options });
+});
+
 export const createAgentDepositRequest = asyncHandler(async (req, res) => {
   const amount = requireNumber(req.body.amount, 'Amount', 1, 1_000_000);
   const agentId = requireString(req.body.agentId, 'Agent ID', 3, 40).toUpperCase();
@@ -320,69 +383,118 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
 export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
   const amount = requireNumber(req.body.amount, 'Amount', 1, 1_000_000);
   const agentId = optionalString(req.body.agentId, 40)?.toUpperCase();
-  const methodKey = optionalString(req.body.methodKey, 50)?.toLowerCase() || optionalString(req.body.method, 50)?.toLowerCase() || 'manual';
-  const userNote = optionalString(req.body.note, 500) || optionalString(req.body.accountNumber, 160) || '';
+  const methodKey = optionalString(req.body.methodKey, 50)?.toLowerCase() || optionalString(req.body.method, 50)?.toLowerCase();
+  const receiverNumber = optionalString(req.body.receiverNumber, 160) || optionalString(req.body.accountNumber, 160) || optionalString(req.body.upiId, 120) || '';
+  const accountHolderName = optionalString(req.body.accountHolderName, 160) || '';
+  const extraNote = optionalString(req.body.note, 500) || '';
 
+  assertOrThrow(methodKey, 'Withdrawal method is required', 400);
+  assertOrThrow(receiverNumber, 'Receiving number/account is required', 400);
   assertOrThrow((req.user.wallet || 0) >= amount, 'Insufficient wallet balance', 400);
+
+  const globalMethods = await getGlobalDepositMethods(true);
+  const globalMethod = globalMethods.find((item) => item.key === methodKey);
+  assertOrThrow(globalMethod, 'Withdrawal method is not active', 404);
+  assertOrThrow(amount >= Number(globalMethod.minAmount || 1), `Minimum amount is ${globalMethod.minAmount}`, 400);
+  assertOrThrow(amount <= Number(globalMethod.maxAmount || 1_000_000), `Maximum amount is ${globalMethod.maxAmount}`, 400);
 
   let agent;
   if (agentId) {
     agent = await Agent.findOne({ agentId, status: 'active' });
   } else {
-    agent = await Agent.findOne({ status: 'active' }).sort({ createdAt: 1 });
+    const activeAgents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(500);
+    const eligibleAgents = activeAgents.filter((item) => isPaymentMethodAssignedToAgent(item, methodKey, globalMethods));
+    agent = pickRandomItem(eligibleAgents);
   }
   assertOrThrow(agent, 'No active agent available for withdrawal', 404);
+  assertOrThrow(
+    isPaymentMethodAssignedToAgent(agent, methodKey, globalMethods),
+    'This withdrawal method is not assigned to the selected agent',
+    403
+  );
 
-  const globalMethods = await getGlobalDepositMethods(false);
-  const method = normalizeAgentPaymentMethods(agent, globalMethods).find((item) => item.key === methodKey) || {
+  const method = normalizeAgentPaymentMethods(agent, globalMethods).find((item) => item.key === methodKey && item.isActive) || {
     key: methodKey,
-    title: methodKey === 'manual' ? 'Manual Withdraw' : methodKey,
+    title: globalMethod.title,
     number: '',
   };
+  assertOrThrow(method?.isActive !== false, 'Selected withdrawal method is not active for this agent', 404);
 
-  const transaction = await Transaction.create({
-    user: req.user._id,
-    type: 'WITHDRAW',
-    amount,
-    status: 'PENDING',
-    method: `agent-${method.key}`,
-    agent: agent._id,
-    agentId: agent.agentId,
-    methodKey: method.key,
-    userNote,
-    accountNumber: optionalString(req.body.accountNumber, 160) || '',
-    accountHolderName: optionalString(req.body.accountHolderName, 160) || '',
-    upiId: optionalString(req.body.upiId, 120) || '',
-    gatewayPayload: {
-      source: 'agent-panel',
-      paymentMethod: method,
-    },
-  });
+  const userNoteParts = [];
+  userNoteParts.push(`Receiving account: ${receiverNumber}`);
+  if (accountHolderName) userNoteParts.push(`Account holder: ${accountHolderName}`);
+  if (extraNote) userNoteParts.push(`Note: ${extraNote}`);
+  const userNote = userNoteParts.join('\n');
 
-  const request = await AgentPaymentRequest.create({
-    type: 'WITHDRAW',
-    status: 'PENDING',
-    user: req.user._id,
-    userId: req.user.userId || req.user.username || req.user._id.toString(),
-    userName: buildUserDisplay(req.user),
-    agent: agent._id,
-    agentId: agent.agentId,
-    amount,
-    methodKey: method.key,
-    methodTitle: method.title,
-    methodNumber: method.number || '',
-    userNote,
-    transaction: transaction._id,
-  });
+  let walletDebited = false;
 
-  transaction.agentPaymentRequest = request._id;
-  await transaction.save();
+  try {
+    await debitWallet(req.user._id, amount, 'agent-withdraw-request-hold');
+    walletDebited = true;
 
-  res.status(201).json({
-    success: true,
-    message: 'Withdrawal request sent to agent panel',
-    data: { request, transaction },
-  });
+    const transaction = await Transaction.create({
+      user: req.user._id,
+      type: 'WITHDRAW',
+      amount,
+      status: 'PENDING',
+      method: `agent-${method.key}`,
+      agent: agent._id,
+      agentId: agent.agentId,
+      methodKey: method.key,
+      userNote,
+      accountNumber: receiverNumber,
+      accountHolderName,
+      upiId: optionalString(req.body.upiId, 120) || receiverNumber,
+      gatewayPayload: {
+        source: 'agent-panel',
+        walletHeld: true,
+        walletHeldAt: new Date(),
+        paymentMethod: {
+          key: method.key,
+          title: globalMethod.title || method.title,
+          image: globalMethod.image,
+        },
+        payout: {
+          receiverNumber,
+          accountHolderName,
+          note: extraNote,
+        },
+      },
+    });
+
+    const request = await AgentPaymentRequest.create({
+      type: 'WITHDRAW',
+      status: 'PENDING',
+      user: req.user._id,
+      userId: req.user.userId || req.user.username || req.user._id.toString(),
+      userName: buildUserDisplay(req.user),
+      agent: agent._id,
+      agentId: agent.agentId,
+      amount,
+      methodKey: method.key,
+      methodTitle: globalMethod.title || method.title,
+      methodNumber: '',
+      userNote,
+      receiverNumber,
+      accountNumber: receiverNumber,
+      accountHolderName,
+      transaction: transaction._id,
+    });
+
+    transaction.agentPaymentRequest = request._id;
+    await transaction.save();
+
+    return res.status(201).json({
+      success: true,
+      message: 'Withdrawal request sent to agent panel',
+      data: { request, transaction },
+    });
+  } catch (error) {
+    if (walletDebited) {
+      await creditWallet(req.user._id, amount, 'agent-withdraw-request-rollback').catch(() => null);
+    }
+    throw error;
+  }
 });
 
 export const requestRazorpayPayout = asyncHandler(async (req, res) => {

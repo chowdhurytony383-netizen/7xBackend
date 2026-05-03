@@ -95,7 +95,12 @@ export const confirmAgentRequest = asyncHandler(async (req, res) => {
   }
 
   if (request.type === 'WITHDRAW') {
-    const updatedUser = await debitWallet(request.user._id, amount, 'agent-withdraw-confirm');
+    const transactionBefore = await Transaction.findById(request.transaction);
+    const walletHeld = transactionBefore?.gatewayPayload?.walletHeld === true;
+
+    const updatedUser = walletHeld
+      ? request.user
+      : await debitWallet(request.user._id, amount, 'agent-withdraw-confirm');
 
     const updatedAgent = await Agent.findByIdAndUpdate(
       req.agent._id,
@@ -108,12 +113,19 @@ export const confirmAgentRequest = asyncHandler(async (req, res) => {
     request.processedAt = new Date();
     await request.save();
 
+    const nextGatewayPayload = {
+      ...(transactionBefore?.gatewayPayload || {}),
+      walletHeld: Boolean(walletHeld),
+      walletReleasedAt: new Date(),
+    };
+
     const transaction = await Transaction.findByIdAndUpdate(
       request.transaction,
       {
         status: 'SUCCESS',
         processedAt: new Date(),
         agentNote: request.agentNote,
+        gatewayPayload: nextGatewayPayload,
       },
       { new: true }
     );
@@ -130,7 +142,9 @@ export const confirmAgentRequest = asyncHandler(async (req, res) => {
 
     return res.json({
       success: true,
-      message: 'Withdrawal confirmed. User wallet deducted and agent balance credited.',
+      message: walletHeld
+        ? 'Withdrawal confirmed. Held wallet amount released and agent balance credited.'
+        : 'Withdrawal confirmed. User wallet deducted and agent balance credited.',
       data: { request, transaction, agent: updatedAgent, user: updatedUser },
     });
   }
@@ -152,12 +166,22 @@ export const rejectAgentRequest = asyncHandler(async (req, res) => {
   request.processedAt = new Date();
   await request.save();
 
+  const transactionBefore = await Transaction.findById(request.transaction);
+  const gatewayPayload = { ...(transactionBefore?.gatewayPayload || {}) };
+
+  if (request.type === 'WITHDRAW' && gatewayPayload.walletHeld === true && gatewayPayload.walletRefunded !== true) {
+    await creditWallet(request.user, request.amount, 'agent-withdraw-reject-refund');
+    gatewayPayload.walletRefunded = true;
+    gatewayPayload.walletRefundedAt = new Date();
+  }
+
   await Transaction.findByIdAndUpdate(
     request.transaction,
     {
       status: 'REJECTED',
       processedAt: new Date(),
       agentNote: request.agentNote,
+      gatewayPayload,
     },
     { new: true }
   );
