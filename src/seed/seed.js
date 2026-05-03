@@ -56,6 +56,22 @@ const games = [
     sortOrder: 3,
   },
   {
+    name: 'bikiniparadise',
+    slug: 'bikini-paradise',
+    gameCode: 'bikiniparadise',
+    displayName: 'Bikini Paradise',
+    description: 'Original source slot game with wallet-backed 25-line spin flow.',
+    image: '/originals/bikiniparadise/icons/icon-512.png',
+    category: 'casino',
+    type: 'source',
+    distribution: 'source',
+    route: '/source-games/bikiniparadise',
+    assetPath: '/originals/bikiniparadise/index.html',
+    provider: 'ViperPro',
+    isActive: true,
+    sortOrder: 4,
+  },
+  {
     name: 'crash',
     slug: 'crash',
     gameCode: 'crash',
@@ -68,7 +84,7 @@ const games = [
     route: '/crash',
     provider: '7XBET',
     isActive: false,
-    sortOrder: 4,
+    sortOrder: 5,
   },
 ];
 
