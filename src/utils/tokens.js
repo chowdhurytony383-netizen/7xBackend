@@ -35,15 +35,29 @@ export function authCookieOptions(maxAgeMs) {
   };
 }
 
+export function buildAuthTokens(user) {
+  return {
+    accessToken: signAccessToken(user),
+    refreshToken: signRefreshToken(user),
+    tokenType: 'Bearer',
+    accessTokenExpiresIn: env.ACCESS_TOKEN_EXPIRES,
+    refreshTokenExpiresIn: env.REFRESH_TOKEN_EXPIRES,
+  };
+}
+
 export function setAuthCookies(res, user) {
-  const accessToken = signAccessToken(user);
-  const refreshToken = signRefreshToken(user);
-  res.cookie('accessToken', accessToken, authCookieOptions(15 * 60 * 1000));
-  res.cookie('refreshToken', refreshToken, authCookieOptions(7 * 24 * 60 * 60 * 1000));
-  return { accessToken, refreshToken };
+  const tokens = buildAuthTokens(user);
+
+  res.cookie('accessToken', tokens.accessToken, authCookieOptions(15 * 60 * 1000));
+  res.cookie('refreshToken', tokens.refreshToken, authCookieOptions(7 * 24 * 60 * 60 * 1000));
+
+  return tokens;
 }
 
 export function clearAuthCookies(res) {
-  res.clearCookie('accessToken', { path: '/' });
-  res.clearCookie('refreshToken', { path: '/' });
+  const options = authCookieOptions(0);
+  delete options.maxAge;
+
+  res.clearCookie('accessToken', options);
+  res.clearCookie('refreshToken', options);
 }
