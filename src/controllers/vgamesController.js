@@ -499,6 +499,605 @@ function iconsPayload() {
   };
 }
 
+
+const BIKINI_SYMBOLS = ['Symbol_1', 'Symbol_2', 'Symbol_3', 'Symbol_4', 'Symbol_5', 'Symbol_6', 'Symbol_7', 'Symbol_8'];
+const BIKINI_SLOT_COUNT = 15;
+const BIKINI_DEFAULT_ICON_DATA = [
+  'Symbol_1', 'Symbol_2', 'Symbol_3', 'Symbol_4', 'Symbol_5',
+  'Symbol_6', 'Symbol_7', 'Symbol_1', 'Symbol_2', 'Symbol_3',
+  'Symbol_4', 'Symbol_5', 'Symbol_6', 'Symbol_7', 'Symbol_8',
+];
+
+const BIKINI_BET_SIZE_LIST = [
+  '0.2', '0.4', '0.8', '1', '2', '3', '4', '5', '10', '15', '20',
+  '25', '30', '40', '50', '75', '100', '150', '200', '250', '500',
+];
+
+// Bikini Paradise 5-reel, 3-row layout uses 15 visible positions.
+// Position order follows the original Construct game payline assets:
+// top row:    1, 2, 3, 4, 5
+// middle row: 6, 7, 8, 9, 10
+// bottom row: 11,12,13,14,15
+const BIKINI_PAYLINES = [
+  { lineIndex: 1, key: 'MIDDLE_ROW', label: 'Middle row', positions: [6, 7, 8, 9, 10] },
+  { lineIndex: 2, key: 'TOP_ROW', label: 'Top row', positions: [1, 2, 3, 4, 5] },
+  { lineIndex: 3, key: 'BOTTOM_ROW', label: 'Bottom row', positions: [11, 12, 13, 14, 15] },
+  { lineIndex: 4, key: 'V_DOWN_UP', label: 'V line 1', positions: [1, 7, 13, 9, 5] },
+  { lineIndex: 5, key: 'V_UP_DOWN', label: 'V line 2', positions: [11, 7, 3, 9, 15] },
+  { lineIndex: 6, key: 'TOP_ZIGZAG', label: 'Top zigzag', positions: [1, 2, 8, 4, 5] },
+  { lineIndex: 7, key: 'BOTTOM_ZIGZAG', label: 'Bottom zigzag', positions: [11, 12, 8, 14, 15] },
+  { lineIndex: 8, key: 'MID_BOTTOM_MID', label: 'Middle-bottom pattern', positions: [6, 12, 13, 14, 10] },
+  { lineIndex: 9, key: 'MID_TOP_MID', label: 'Middle-top pattern', positions: [6, 2, 3, 4, 10] },
+  { lineIndex: 10, key: 'TOP_MIDDLE_TOP', label: 'Top-middle-top', positions: [1, 7, 8, 9, 5] },
+  { lineIndex: 11, key: 'BOTTOM_MIDDLE_BOTTOM', label: 'Bottom-middle-bottom', positions: [11, 7, 8, 9, 15] },
+  { lineIndex: 12, key: 'M_TOP_M_MID', label: 'Middle top mix', positions: [6, 2, 8, 4, 10] },
+  { lineIndex: 13, key: 'M_BOTTOM_M_MID', label: 'Middle bottom mix', positions: [6, 12, 8, 14, 10] },
+  { lineIndex: 14, key: 'TOP_V_SHORT', label: 'Top V short', positions: [1, 7, 3, 9, 5] },
+  { lineIndex: 15, key: 'BOTTOM_V_SHORT', label: 'Bottom V short', positions: [11, 7, 13, 9, 15] },
+  { lineIndex: 16, key: 'TOP_BOTTOM_ALT', label: 'Top-bottom alternate', positions: [1, 12, 3, 14, 5] },
+  { lineIndex: 17, key: 'BOTTOM_TOP_ALT', label: 'Bottom-top alternate', positions: [11, 2, 13, 4, 15] },
+  { lineIndex: 18, key: 'MID_TOP_RIGHT', label: 'Middle top right', positions: [6, 7, 3, 9, 10] },
+  { lineIndex: 19, key: 'MID_BOTTOM_RIGHT', label: 'Middle bottom right', positions: [6, 7, 13, 9, 10] },
+  { lineIndex: 20, key: 'TOP_BOTTOM_MID', label: 'Top bottom mid', positions: [1, 12, 8, 14, 5] },
+  { lineIndex: 21, key: 'BOTTOM_TOP_MID', label: 'Bottom top mid', positions: [11, 2, 8, 4, 15] },
+  { lineIndex: 22, key: 'TOP_LOW_LOW_TOP', label: 'Top low low top', positions: [1, 12, 13, 14, 5] },
+  { lineIndex: 23, key: 'BOTTOM_HIGH_HIGH_BOTTOM', label: 'Bottom high high bottom', positions: [11, 2, 3, 4, 15] },
+  { lineIndex: 24, key: 'TOP_LOW_MID_HIGH_BOTTOM', label: 'Cross line 1', positions: [1, 12, 8, 4, 15] },
+  { lineIndex: 25, key: 'BOTTOM_HIGH_MID_LOW_TOP', label: 'Cross line 2', positions: [11, 2, 8, 14, 5] },
+];
+
+const BIKINI_SYMBOL_RULES = {
+  Symbol_1: { label: 'Low symbol 1', payouts: { 3: 2, 4: 6, 5: 20 } },
+  Symbol_2: { label: 'Low symbol 2', payouts: { 3: 3, 4: 8, 5: 25 } },
+  Symbol_3: { label: 'Low symbol 3', payouts: { 3: 4, 4: 10, 5: 30 } },
+  Symbol_4: { label: 'Medium symbol 4', payouts: { 3: 5, 4: 15, 5: 50 } },
+  Symbol_5: { label: 'Medium symbol 5', payouts: { 3: 8, 4: 20, 5: 80 } },
+  Symbol_6: { label: 'High symbol 6', payouts: { 3: 10, 4: 30, 5: 100 } },
+  Symbol_7: { label: 'High symbol 7', payouts: { 3: 15, 4: 50, 5: 150 } },
+  Symbol_8: { label: 'Premium symbol 8', payouts: { 3: 20, 4: 80, 5: 250 } },
+};
+
+const BIKINI_WIN_SYMBOL_WEIGHTS = [
+  { symbol: 'Symbol_1', weight: 2600 },
+  { symbol: 'Symbol_2', weight: 2300 },
+  { symbol: 'Symbol_3', weight: 2000 },
+  { symbol: 'Symbol_4', weight: 1600 },
+  { symbol: 'Symbol_5', weight: 1200 },
+  { symbol: 'Symbol_6', weight: 800 },
+  { symbol: 'Symbol_7', weight: 450 },
+  { symbol: 'Symbol_8', weight: 200 },
+];
+
+function isBikiniGame(game) {
+  return String(game?.gameCode || game?.name || '').toLowerCase().replace(/[-_\s]/g, '') === 'bikiniparadise';
+}
+
+function randomBikiniSymbol() {
+  return pick(BIKINI_SYMBOLS);
+}
+
+function nextDifferentBikiniSymbol(symbol) {
+  const currentIndex = BIKINI_SYMBOLS.indexOf(symbol);
+  return BIKINI_SYMBOLS[(Math.max(currentIndex, 0) + 1) % BIKINI_SYMBOLS.length];
+}
+
+function randomBikiniSlotIcons() {
+  return Array.from({ length: BIKINI_SLOT_COUNT }, randomBikiniSymbol);
+}
+
+function getBikiniLineSymbols(slots, payline) {
+  return payline.positions.map((position) => slots[position - 1]);
+}
+
+function getBikiniLineWinInfo(symbols) {
+  if (!Array.isArray(symbols) || symbols.length < 3 || !symbols[0]) return null;
+
+  let targetSymbol = null;
+  let combine = 0;
+  let hasWild = false;
+
+  for (const symbol of symbols) {
+    if (!symbol) break;
+
+    if (isWildSymbol(symbol)) {
+      hasWild = true;
+      combine += 1;
+      continue;
+    }
+
+    if (!targetSymbol) {
+      targetSymbol = symbol;
+      combine += 1;
+      continue;
+    }
+
+    if (symbol === targetSymbol) {
+      combine += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  if (combine < 3) return null;
+
+  if (!targetSymbol) {
+    targetSymbol = Object.entries(BIKINI_SYMBOL_RULES)
+      .sort(([, a], [, b]) => (b.payouts[5] || 0) - (a.payouts[5] || 0))[0][0];
+  }
+
+  const rule = BIKINI_SYMBOL_RULES[targetSymbol];
+  if (!rule) return null;
+
+  const cappedCombine = Math.min(combine, 5);
+  const payout = rule.payouts[cappedCombine] || rule.payouts[3] || 0;
+  if (!payout) return null;
+
+  return {
+    symbol: targetSymbol,
+    rule,
+    combine: cappedCombine,
+    payout,
+    hasWild,
+  };
+}
+
+function isBikiniLineWin(symbols) {
+  return Boolean(getBikiniLineWinInfo(symbols));
+}
+
+function evaluateBikiniSlotIcons(slots, lineBet) {
+  const activeLines = [];
+  const activeIcons = new Set();
+  let baseWinAmount = 0;
+  let baseMultiplier = 0;
+
+  for (const payline of BIKINI_PAYLINES) {
+    const lineSymbols = getBikiniLineSymbols(slots, payline);
+    const winInfo = getBikiniLineWinInfo(lineSymbols);
+    if (!winInfo) continue;
+
+    const { symbol, rule, combine, payout, hasWild } = winInfo;
+    const activePositions = payline.positions.slice(0, combine);
+    const lineWin = money(lineBet * payout);
+    baseWinAmount = money(baseWinAmount + lineWin);
+    baseMultiplier = money(baseMultiplier + payout);
+
+    for (const position of activePositions) activeIcons.add(position);
+
+    activeLines.push({
+      name: symbol,
+      symbol,
+      symbol_label: rule.label,
+      line: payline.key,
+      line_label: payline.label,
+      index: payline.lineIndex,
+      payout,
+      combine,
+      way_243: 1,
+      multiply: 0,
+      win_amount: lineWin,
+      base_win_amount: lineWin,
+      x10_multiplier: false,
+      has_wild: hasWild,
+      raw_symbols: lineSymbols,
+      active_icon: activePositions,
+    });
+  }
+
+  // Original rule screen: when all symbols in the reels are involved in a win, multiply total win by x10.
+  const allVisibleIconsInvolved = activeIcons.size >= 15;
+  const x10MultiplierApplied = baseWinAmount > 0 && allVisibleIconsInvolved;
+
+  if (x10MultiplierApplied) {
+    for (const line of activeLines) {
+      line.x10_multiplier = true;
+      line.multiply = 10;
+      line.win_amount = money(line.win_amount * 10);
+    }
+  }
+
+  const winAmount = x10MultiplierApplied ? money(baseWinAmount * 10) : baseWinAmount;
+  const totalMultiplier = x10MultiplierApplied ? money(baseMultiplier * 10) : baseMultiplier;
+
+  let winType = 'LOSE';
+  if (winAmount > 0) {
+    winType = x10MultiplierApplied || activeLines.length >= 3 || totalMultiplier >= 50 ? 'BIG_WIN' : 'WIN';
+  }
+
+  return {
+    isWin: winAmount > 0,
+    winAmount,
+    totalMultiplier,
+    baseWinAmount,
+    baseMultiplier,
+    x10MultiplierApplied,
+    allVisibleIconsInvolved,
+    activeIcons: Array.from(activeIcons).sort((a, b) => a - b),
+    activeLines,
+    winType,
+  };
+}
+
+function buildBikiniLoseSlotIcons() {
+  const slots = randomBikiniSlotIcons();
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    let fixedAnyLine = false;
+
+    for (const payline of BIKINI_PAYLINES) {
+      const symbols = getBikiniLineSymbols(slots, payline);
+      if (!isBikiniLineWin(symbols)) continue;
+
+      const breakPosition = payline.positions[2] - 1;
+      slots[breakPosition] = nextDifferentBikiniSymbol(slots[breakPosition]);
+      fixedAnyLine = true;
+    }
+
+    if (!fixedAnyLine) break;
+  }
+
+  return slots;
+}
+
+function repairUnexpectedBikiniWinningLines(slots, targetPaylines) {
+  const targetKeys = new Set(targetPaylines.map((payline) => payline.key));
+  const protectedPositions = new Set(targetPaylines.flatMap((payline) => payline.positions.slice(0, 3)));
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    let repaired = false;
+
+    for (const payline of BIKINI_PAYLINES) {
+      if (targetKeys.has(payline.key)) continue;
+
+      const symbols = getBikiniLineSymbols(slots, payline);
+      if (!isBikiniLineWin(symbols)) continue;
+
+      const breakPosition = payline.positions.find((position) => !protectedPositions.has(position));
+      if (!breakPosition) continue;
+
+      slots[breakPosition - 1] = nextDifferentBikiniSymbol(slots[breakPosition - 1]);
+      repaired = true;
+    }
+
+    if (!repaired) break;
+  }
+
+  return slots;
+}
+
+function buildBikiniWinSlotIcons({ payline, symbol, combine = 3 }) {
+  const slots = buildBikiniLoseSlotIcons();
+
+  for (const position of payline.positions.slice(0, combine)) {
+    slots[position - 1] = symbol;
+  }
+
+  return repairUnexpectedBikiniWinningLines(slots, [payline]);
+}
+
+function buildBikiniBigWinSlotIcons({ symbol }) {
+  const slots = Array.from({ length: BIKINI_SLOT_COUNT }, () => symbol);
+  return slots;
+}
+
+function pickBikiniSpinPlan(isDemoMode = false) {
+  const spinTable = isDemoMode
+    ? [{ type: 'LOSE', weight: 4500 }, { type: 'WIN', weight: 4500 }, { type: 'BIG_WIN', weight: 1000 }]
+    : [{ type: 'LOSE', weight: 6800 }, { type: 'WIN', weight: 2900 }, { type: 'BIG_WIN', weight: 300 }];
+
+  const outcome = weightedPick(spinTable);
+
+  if (outcome.type === 'LOSE') {
+    return { type: 'LOSE', payline: null, paylines: [], symbol: null, combine: 0 };
+  }
+
+  if (outcome.type === 'BIG_WIN') {
+    return {
+      type: 'BIG_WIN',
+      payline: BIKINI_PAYLINES[0],
+      paylines: BIKINI_PAYLINES,
+      symbol: weightedPick(BIKINI_WIN_SYMBOL_WEIGHTS).symbol,
+      combine: 5,
+    };
+  }
+
+  const payline = pick(BIKINI_PAYLINES);
+  const combinePick = weightedPick([{ value: 3, weight: 7600 }, { value: 4, weight: 1900 }, { value: 5, weight: 500 }]).value;
+
+  return {
+    type: 'WIN',
+    payline,
+    paylines: [payline],
+    symbol: weightedPick(BIKINI_WIN_SYMBOL_WEIGHTS).symbol,
+    combine: combinePick,
+  };
+}
+
+function bikiniRulesPayload() {
+  return {
+    success: true,
+    data: {
+      description: 'Bikini Paradise 5-reel, 3-row slot rules: 25 fixed bet lines, symbols must match from the leftmost reel to the right, Wild substitutes for all symbols, simultaneous wins are added, and x10 applies when all 15 visible symbols are involved in a win.',
+      game_type: '5_REEL_3_ROW_FIXED_25_LINES',
+      win_condition: '3_OR_MORE_MATCHING_OR_WILD_SUBSTITUTED_SYMBOLS_FROM_LEFTMOST_REEL_TO_RIGHT_ON_ACTIVE_PAYLINE',
+      lose_condition: 'NO_MATCHING_3_SYMBOL_ACTIVE_PAYLINE',
+      two_same_is_win: false,
+      scattered_same_symbols_is_win: false,
+      only_highest_win_per_bet_line_is_paid: true,
+      simultaneous_wins_are_added: true,
+      wild_substitutes_for_all_symbols: true,
+      num_line: 25,
+      line_num: 25,
+      paylines: BIKINI_PAYLINES,
+      x10_multiplier_rule: {
+        description: 'When all 15 visible symbols in the reels are involved in winning paylines, the total win is multiplied by x10.',
+        condition: 'ALL_15_VISIBLE_POSITIONS_ACTIVE_IN_WINNING_PAYLINES',
+      },
+      big_win_rules: {
+        description: 'BIG WIN is used when x10 is applied, or when 3 or more active paylines win in one spin, or when total multiplier is 50x or more.',
+        conditions: ['X10_MULTIPLIER_APPLIED', '3_OR_MORE_PAYLINES', 'TOTAL_MULTIPLIER_GTE_50'],
+      },
+      symbol_rules: Object.entries(BIKINI_SYMBOL_RULES).map(([symbol, rule]) => ({
+        symbol,
+        label: rule.label,
+        payouts: rule.payouts,
+        example: `${symbol} on active payline from leftmost reel: 3=${rule.payouts[3]}x, 4=${rule.payouts[4]}x, 5=${rule.payouts[5]}x`,
+      })),
+    },
+  };
+}
+
+function bikiniSessionPayload(user, token) {
+  const displayCurrency = user.currency || 'BDT';
+  const balances = balanceFields(user.wallet);
+
+  return {
+    success: true,
+    message: 'Session success',
+    data: {
+      token,
+      user_name: user.name || user.fullName || user.username || user.userId || 'Player',
+      ...balances,
+      num_line: 25,
+      line_num: 25,
+      bet_amount: 0.2,
+      free_num: 0,
+      free_total: -1,
+      free_amount: 4,
+      free_multi: 0,
+      freespin_mode: 0,
+      credit_line: 1,
+      buy_feature: 50,
+      buy_max: 1300,
+      total_way: 243,
+      multiply: 0,
+      multipy: 0,
+      previous_session: false,
+      game_state: '',
+      bet_size_list: BIKINI_BET_SIZE_LIST,
+      currency_prefix: displayCurrency,
+      currency_suffix: '',
+      currency_thousand: ',',
+      currency_decimal: '.',
+      icon_data: BIKINI_DEFAULT_ICON_DATA,
+      active_icons: [],
+      active_lines: [],
+      drop_line: [],
+      multiple_list: [],
+      feature: [],
+      feature_result: [],
+      rules: bikiniRulesPayload().data,
+    },
+  };
+}
+
+function bikiniIconsPayload() {
+  const icons = [
+    { icon_name: 'Symbol_0', name: 'Symbol_0', value: 'Symbol_0' },
+    { icon_name: 'Symbol_1', name: 'Symbol_1', value: 'Symbol_1' },
+    { icon_name: 'Symbol_2', name: 'Symbol_2', value: 'Symbol_2' },
+    { icon_name: 'Symbol_3', name: 'Symbol_3', value: 'Symbol_3' },
+    { icon_name: 'Symbol_4', name: 'Symbol_4', value: 'Symbol_4' },
+    { icon_name: 'Symbol_5', name: 'Symbol_5', value: 'Symbol_5' },
+    { icon_name: 'Symbol_6', name: 'Symbol_6', value: 'Symbol_6' },
+    { icon_name: 'Symbol_7', name: 'Symbol_7', value: 'Symbol_7' },
+    { icon_name: 'Symbol_8', name: 'Symbol_8', value: 'Symbol_8' },
+    { icon_name: 'Scatter', name: 'scatter', value: 'scatter' },
+    { icon_name: 'Wild', name: 'wild', value: 'wild' },
+    { icon_name: 'scatter', name: 'scatter', value: 'scatter' },
+    { icon_name: 'wild', name: 'wild', value: 'wild' },
+  ];
+
+  return {
+    success: true,
+    data: icons,
+  };
+}
+
+function createBikiniSpinView({ finalWallet, totalBet, lineBet, betAmountRaw, cpl, numLine, evaluation, slots, auditHash, plan }) {
+  const isWin = evaluation.winAmount > 0;
+  const balances = balanceFields(finalWallet);
+  const selectedPaylines = plan.paylines?.map((payline) => payline.key) || [];
+
+  return {
+    success: true,
+    message: 'Spin success',
+    data: {
+      ...balances,
+      freemode: false,
+      jackpot: 0,
+      free_spin: 0,
+      free_num: 0,
+      scaler: 0,
+      num_line: numLine,
+      line_num: numLine,
+      cpl,
+      credit_line: cpl,
+      betamount: betAmountRaw,
+      bet_amount: betAmountRaw,
+      total_bet: totalBet,
+      line_bet: lineBet,
+      win_amount: evaluation.winAmount,
+      profit: money(evaluation.winAmount - totalBet),
+      balance: money(finalWallet),
+      result: evaluation.winType,
+      win_type: evaluation.winType,
+      audit_hash: auditHash,
+      rules: {
+        win_condition: '3 or more matching symbols from the leftmost reel to the right on one active payline',
+        lose_condition: 'no matching 3-symbol active payline',
+        x10_multiplier_applied: evaluation.x10MultiplierApplied,
+        selected_payline: plan.payline?.key || null,
+        selected_paylines: selectedPaylines,
+        selected_symbol: plan.symbol || null,
+      },
+      pull: {
+        TotalWay: 243,
+        FreeSpin: 0,
+        LastMultiply: 0,
+        WildFixedIcons: [],
+        HasJackpot: false,
+        HasScatter: false,
+        CountScatter: 0,
+        WildColumIcon: '',
+        MultipyScatter: 0,
+        MultiplyCount: evaluation.totalMultiplier || 0,
+        WinLogs: isWin
+          ? evaluation.activeLines.map((line) => `[${evaluation.winType}] ${line.symbol_label} on ${line.line_label}: ${line.combine} symbols, ${line.payout}x => ${line.win_amount}`)
+          : ['[LOSE] No 3 or more matching symbols on any active payline'],
+        DropLine: 0,
+        MultipleList: evaluation.activeLines.map((line) => line.payout),
+        WinAmount: evaluation.winAmount,
+        WinOnDrop: evaluation.winAmount,
+        SlotIcons: slots,
+        ActiveIcons: evaluation.activeIcons,
+        ActiveLines: evaluation.activeLines,
+        DropLineData: [],
+      },
+    },
+  };
+}
+
+async function handleBikiniSpin(req, res, user, game) {
+  const merged = { ...req.query, ...req.body };
+  const cpl = Math.max(Math.floor(numberValue(merged.cpl || merged.credit_line, 1)), 1);
+  const betAmountRaw = Math.max(numberValue(merged.betamount || merged.bet_amount, 0.2), 0.2);
+  const numLine = Math.max(Math.floor(numberValue(merged.numline || merged.num_line, 25)), 1);
+  const lineBet = money(cpl * betAmountRaw);
+  const totalBet = money(lineBet * numLine);
+
+  if (!totalBet || totalBet <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid bet amount' });
+  }
+
+  if (totalBet > MAX_TOTAL_BET) {
+    return res.status(400).json({ success: false, message: `Maximum total bet is ${MAX_TOTAL_BET}` });
+  }
+
+  const debitedUser = await User.findOneAndUpdate(
+    { _id: user._id, wallet: { $gte: totalBet }, status: 'active' },
+    { $inc: { wallet: -totalBet } },
+    { new: true }
+  );
+
+  if (!debitedUser) {
+    return res.status(400).json({ success: false, message: 'Insufficient balance' });
+  }
+
+  const plan = pickBikiniSpinPlan(Boolean(user.is_demo_agent || user.isDemo || user.demoMode));
+  let slots = plan.type === 'BIG_WIN'
+    ? buildBikiniBigWinSlotIcons({ symbol: plan.symbol })
+    : plan.type === 'WIN'
+      ? buildBikiniWinSlotIcons({ payline: plan.payline, symbol: plan.symbol, combine: plan.combine })
+      : buildBikiniLoseSlotIcons();
+
+  let evaluation = evaluateBikiniSlotIcons(slots, lineBet);
+
+  if (plan.type === 'LOSE' && evaluation.isWin) {
+    slots = buildBikiniLoseSlotIcons();
+    evaluation = evaluateBikiniSlotIcons(slots, lineBet);
+  }
+
+  if ((plan.type === 'WIN' || plan.type === 'BIG_WIN') && !evaluation.isWin) {
+    slots = plan.type === 'BIG_WIN'
+      ? buildBikiniBigWinSlotIcons({ symbol: plan.symbol })
+      : buildBikiniWinSlotIcons({ payline: plan.payline, symbol: plan.symbol, combine: plan.combine });
+    evaluation = evaluateBikiniSlotIcons(slots, lineBet);
+  }
+
+  const serverSeed = crypto.randomBytes(32).toString('hex');
+  const clientSeed = clientSeedFromRequest(req);
+  const createdAt = new Date();
+  const auditHash = makeAuditHash({
+    serverSeed,
+    clientSeed,
+    userId: user._id.toString(),
+    gameCode: game.gameCode,
+    totalBet,
+    slotIcons: slots,
+    createdAt: createdAt.toISOString(),
+  });
+
+  let finalUser = debitedUser;
+  if (evaluation.winAmount > 0) {
+    finalUser = await User.findByIdAndUpdate(user._id, { $inc: { wallet: evaluation.winAmount } }, { new: true });
+  }
+
+  await Bet.create({
+    user: user._id,
+    game: game._id,
+    gameName: game.gameCode || 'bikiniparadise',
+    betAmount: totalBet,
+    winAmount: evaluation.winAmount,
+    isWin: evaluation.isWin,
+    status: evaluation.winType,
+    gameData: {
+      source: 'vgames',
+      engine: 'bikini-paradise-25-line-v1',
+      outcome: evaluation.winType,
+      selectedPayline: plan.payline?.key || null,
+      selectedPaylines: plan.paylines?.map((payline) => payline.key) || [],
+      selectedSymbol: plan.symbol || null,
+      totalMultiplier: evaluation.totalMultiplier,
+      cpl,
+      betamount: betAmountRaw,
+      numLine,
+      lineBet,
+      slotCount: BIKINI_SLOT_COUNT,
+      slotIcons: slots,
+      activeIcons: evaluation.activeIcons,
+      activeLines: evaluation.activeLines,
+      ruleSummary: {
+        win: '3 or more matching symbols from leftmost reel to right on the 25 fixed paylines',
+        lose: 'no 3 matching symbols from leftmost reel on any active payline',
+        wild: 'Symbol_0 / Wild substitutes for all symbols',
+        x10: 'All 15 visible symbols involved in wins = total win x10',
+      },
+      symbolRules: BIKINI_SYMBOL_RULES,
+      paylines: BIKINI_PAYLINES,
+      serverSeedHash: crypto.createHash('sha256').update(serverSeed).digest('hex'),
+      auditHash,
+      clientSeed,
+      balanceAfter: money(finalUser.wallet),
+      createdAt: createdAt.toISOString(),
+    },
+  });
+
+  return res.json(createBikiniSpinView({
+    finalWallet: finalUser.wallet,
+    totalBet,
+    lineBet,
+    betAmountRaw,
+    cpl,
+    numLine,
+    evaluation,
+    slots,
+    auditHash,
+    plan,
+  }));
+}
+
 function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, evaluation, slots, auditHash, plan }) {
   const isWin = evaluation.winAmount > 0;
   const balances = balanceFields(finalWallet);
@@ -888,12 +1487,13 @@ export async function handleVGameAction(req, res) {
   }
 
   const { user, game, token } = resolved;
+  const isBikini = isBikiniGame(game);
 
-  if (action === 'session') return res.json(sessionPayload(user, token));
-  if (action === 'icons') return res.json(iconsPayload());
-  if (action === 'rules') return res.json(rulesPayload());
-  if (action === 'spin') return handleSpin(req, res, user, game);
-  if (action === 'buy') return handleSpin(req, res, user, game);
+  if (action === 'session') return res.json(isBikini ? bikiniSessionPayload(user, token) : sessionPayload(user, token));
+  if (action === 'icons') return res.json(isBikini ? bikiniIconsPayload() : iconsPayload());
+  if (action === 'rules') return res.json(isBikini ? bikiniRulesPayload() : rulesPayload());
+  if (action === 'spin') return isBikini ? handleBikiniSpin(req, res, user, game) : handleSpin(req, res, user, game);
+  if (action === 'buy') return isBikini ? handleBikiniSpin(req, res, user, game) : handleSpin(req, res, user, game);
   if (action === 'logs') return handleHistories(req, res, user, game, { legacyArray: true });
   if (action === 'histories') return handleHistories(req, res, user, game);
   if (action === 'history_detail') return handleHistoryDetailAction(req, res, user, game);

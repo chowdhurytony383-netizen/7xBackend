@@ -4,15 +4,57 @@ import { env } from '../config/env.js';
 
 const allowedSourceGames = {
   fortunetiger: {
+    name: 'fortunetiger',
+    slug: 'fortune-tiger',
     gameCode: 'fortunetiger',
     displayName: 'Fortune Tiger',
+    description: 'Original source slot game.',
+    image: '/originals/fortunetiger/icons/icon-512.png',
+    category: 'casino',
+    type: 'source',
+    distribution: 'source',
+    route: '/source-games/fortunetiger',
     assetPath: '/originals/fortunetiger/index.html',
+    provider: 'ViperPro',
+    sortOrder: 3,
+  },
+  bikiniparadise: {
+    name: 'bikiniparadise',
+    slug: 'bikini-paradise',
+    gameCode: 'bikiniparadise',
+    displayName: 'Bikini Paradise',
+    description: 'Original source slot game with wallet-backed 25-line spin flow.',
+    image: '/originals/bikiniparadise/icons/icon-512.png',
+    category: 'casino',
+    type: 'source',
+    distribution: 'source',
+    route: '/source-games/bikiniparadise',
+    assetPath: '/originals/bikiniparadise/index.html',
+    provider: 'ViperPro',
+    sortOrder: 4,
   },
 };
 
+async function ensureSourceGameRecord(gameConfig) {
+  let dbGame = await Game.findOne({ gameCode: gameConfig.gameCode });
+
+  if (!dbGame) {
+    dbGame = await Game.create({
+      ...gameConfig,
+      isActive: true,
+    });
+  }
+
+  return dbGame;
+}
+
 export async function createSourceGameSession(req, res) {
-  const { gameCode } = req.params;
-  const game = allowedSourceGames[gameCode];
+  const normalizedGameCode = String(req.params.gameCode || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[-_\s]/g, '');
+
+  const game = allowedSourceGames[normalizedGameCode];
 
   if (!game) {
     return res.status(404).json({
@@ -21,12 +63,9 @@ export async function createSourceGameSession(req, res) {
     });
   }
 
-  const dbGame = await Game.findOne({
-    gameCode,
-    isActive: true,
-  });
+  const dbGame = await ensureSourceGameRecord(game);
 
-  if (!dbGame) {
+  if (!dbGame?.isActive) {
     return res.status(404).json({
       success: false,
       message: 'Game is not active',
@@ -36,7 +75,7 @@ export async function createSourceGameSession(req, res) {
   const token = jwt.sign(
     {
       userId: req.user._id.toString(),
-      gameCode,
+      gameCode: game.gameCode,
       type: 'source-game',
     },
     env.JWT_ACCESS_SECRET,
@@ -48,7 +87,7 @@ export async function createSourceGameSession(req, res) {
     message: 'Source game session created',
     data: {
       token,
-      gameCode,
+      gameCode: game.gameCode,
       title: game.displayName,
       assetPath: game.assetPath,
       userId: req.user?._id,
