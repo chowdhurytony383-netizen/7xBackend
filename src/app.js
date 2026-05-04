@@ -60,7 +60,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(passport.initialize());
 
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: true, legacyHeaders: false });
+const limiter = rateLimit({ windowMs: env.API_RATE_LIMIT_WINDOW_MS, limit: env.API_RATE_LIMIT_MAX, standardHeaders: true, legacyHeaders: false });
 app.use('/api', limiter);
 app.use('/uploads', express.static(path.resolve('uploads')));
 
