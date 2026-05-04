@@ -1,5 +1,6 @@
 import CryptoDeposit from '../models/CryptoDeposit.js';
 import CryptoMethod from '../models/CryptoMethod.js';
+import CryptoWithdrawal from '../models/CryptoWithdrawal.js';
 import UserCryptoAddress from '../models/UserCryptoAddress.js';
 import { env } from '../config/env.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -12,6 +13,8 @@ import {
 } from '../services/cryptoAddressService.js';
 import { processCryptoWebhookPayload } from '../services/cryptoWebhookService.js';
 import { syncTatumSubscriptions } from '../services/cryptoSubscriptionService.js';
+import { getCryptoWithdrawOptions, createCryptoWithdrawalRequest } from '../services/cryptoWithdrawService.js';
+import { requireNumber, requireString, optionalString } from '../utils/validation.js';
 
 export const myCryptoAddresses = asyncHandler(async (req, res) => {
   const items = await ensureUserCryptoAddresses(req.user);
@@ -31,6 +34,40 @@ export const myCryptoDeposits = asyncHandler(async (req, res) => {
   res.json({ success: true, data: deposits, deposits });
 });
 
+
+export const cryptoWithdrawOptions = asyncHandler(async (_req, res) => {
+  const options = await getCryptoWithdrawOptions();
+  res.json({ success: true, data: options, options });
+});
+
+export const createCryptoWithdrawal = asyncHandler(async (req, res) => {
+  const methodKey = requireString(req.body.methodKey || req.body.key, 'Crypto method', 2, 40).toUpperCase();
+  const amountFiat = requireNumber(req.body.amount || req.body.amountFiat, 'Amount', 1, 1_000_000);
+  const toAddress = requireString(req.body.address || req.body.toAddress, 'Wallet address', 20, 160);
+  const memo = optionalString(req.body.memo, 120) || '';
+
+  const result = await createCryptoWithdrawalRequest({
+    user: req.user,
+    amountFiat,
+    methodKey,
+    toAddress,
+    memo,
+  });
+
+  res.status(201).json({
+    success: true,
+    message: result.withdrawal.status === 'success'
+      ? 'Crypto withdrawal sent successfully'
+      : 'Crypto withdrawal request created',
+    data: result,
+  });
+});
+
+export const myCryptoWithdrawals = asyncHandler(async (req, res) => {
+  const withdrawals = await CryptoWithdrawal.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(50);
+  res.json({ success: true, data: withdrawals, withdrawals });
+});
+
 export const adminListCryptoMethods = asyncHandler(async (_req, res) => {
   await syncDefaultCryptoMethods();
   const methods = await CryptoMethod.find().sort({ sortOrder: 1, displayName: 1 });
@@ -41,7 +78,7 @@ export const adminUpdateCryptoMethod = asyncHandler(async (req, res) => {
   const key = String(req.params.key || '').trim().toUpperCase();
   assertOrThrow(key, 'Crypto method key is required', 400);
 
-  const allowed = ['enabled', 'displayName', 'minDepositCrypto', 'minDepositFiat', 'confirmations', 'warning', 'logo', 'sortOrder'];
+  const allowed = ['enabled', 'displayName', 'minDepositCrypto', 'minDepositFiat', 'withdrawEnabled', 'minWithdrawFiat', 'maxWithdrawFiat', 'withdrawWarning', 'confirmations', 'warning', 'logo', 'sortOrder'];
   const update = {};
   for (const field of allowed) {
     if (req.body[field] !== undefined) update[field] = req.body[field];
