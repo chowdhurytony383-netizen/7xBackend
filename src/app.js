@@ -37,7 +37,22 @@ const app = express();
 
 app.set('trust proxy', 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+const allowedOrigins = String(env.CORS_ORIGIN || env.FRONTEND_URL || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+  })
+);
 app.use(compression());
 app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(cookieParser());
