@@ -33,6 +33,9 @@ import crashGameRoutes from './routes/crashGameRoutes.js';
 import cryptoRoutes from './routes/cryptoRoutes.js';
 import adminCryptoRoutes from './routes/adminCryptoRoutes.js';
 
+// 7X Crush provider launch route
+import crushProviderLaunchRoutes from './routes/crushProviderLaunchRoutes.js';
+
 // 7X Crush provider wallet callback routes
 import providerWalletRoutes from './routes/providerWalletRoutes.js';
 
@@ -75,8 +78,7 @@ app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(cookieParser());
 
 // IMPORTANT:
-// Provider wallet callback signature verify করার জন্য rawBody দরকার.
-// তাই express.json এর verify option add করা হয়েছে।
+// Provider wallet callback signature verify করার জন্য rawBody দরকার।
 app.use(
   express.json({
     limit: '1mb',
@@ -116,6 +118,12 @@ app.get('/api/health', (_req, res) =>
 
 app.use('/api/user', userRoutes);
 app.use('/api/bet', betRoutes);
+
+// 7X Crush provider launch API
+// Final URL:
+// POST /api/games/7x-crush/launch
+app.use('/api/games/7x-crush', crushProviderLaunchRoutes);
+
 app.use('/api/games', gameRoutes);
 app.use('/api/crash', crashGameRoutes);
 app.use('/api/crypto', cryptoRoutes);
