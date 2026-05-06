@@ -83,11 +83,6 @@ function fromCents(cents) {
   return Number(cents || 0) / 100;
 }
 
-// IMPORTANT:
-// এখানে ধরে নেওয়া হয়েছে আপনার User model এ balance field আছে।
-// যদি আপনার project এ field name আলাদা হয়, যেমন wallet.balance,
-// তাহলে নিচের balance related অংশ adjust করতে হবে.
-
 router.post('/wallet/balance', verifyProviderSignature, async (req, res) => {
   try {
     const { userId, currency = 'BDT' } = req.body;
@@ -101,12 +96,19 @@ router.post('/wallet/balance', verifyProviderSignature, async (req, res) => {
       });
     }
 
-    const balanceCents = toCents(user.balance || 0);
+    if (user.status && user.status !== 'active') {
+      return res.status(403).json({
+        ok: false,
+        message: 'User account is not active.',
+      });
+    }
+
+    const balanceCents = toCents(user.wallet || 0);
 
     return res.json({
       ok: true,
       balanceCents,
-      currency,
+      currency: user.currency || currency || 'BDT',
     });
   } catch (error) {
     return res.status(500).json({
@@ -131,7 +133,9 @@ router.post('/wallet/debit', verifyProviderSignature, async (req, res) => {
       slot,
     } = req.body;
 
-    if (!txnId || !userId || !amountCents || Number(amountCents) <= 0) {
+    const cents = Number(amountCents);
+
+    if (!txnId || !userId || !Number.isFinite(cents) || cents <= 0) {
       return res.status(400).json({
         ok: false,
         message: 'Invalid debit request.',
@@ -148,15 +152,16 @@ router.post('/wallet/debit', verifyProviderSignature, async (req, res) => {
         return;
       }
 
-      const amount = fromCents(amountCents);
+      const amount = fromCents(cents);
 
       const user = await User.findOneAndUpdate(
         {
           _id: userId,
-          balance: { $gte: amount },
+          status: 'active',
+          wallet: { $gte: amount },
         },
         {
-          $inc: { balance: -amount },
+          $inc: { wallet: -amount },
         },
         {
           new: true,
@@ -170,8 +175,8 @@ router.post('/wallet/debit', verifyProviderSignature, async (req, res) => {
 
       finalResponse = {
         ok: true,
-        balanceCents: toCents(user.balance),
-        currency,
+        balanceCents: toCents(user.wallet),
+        currency: user.currency || currency || 'BDT',
       };
 
       await ProviderWalletTxn.create(
@@ -181,8 +186,8 @@ router.post('/wallet/debit', verifyProviderSignature, async (req, res) => {
             type: 'debit',
             userId,
             sessionId,
-            amountCents,
-            currency,
+            amountCents: cents,
+            currency: user.currency || currency || 'BDT',
             roundId,
             betId,
             slot,
@@ -221,7 +226,9 @@ router.post('/wallet/credit', verifyProviderSignature, async (req, res) => {
       multiplier,
     } = req.body;
 
-    if (!txnId || !userId || !amountCents || Number(amountCents) <= 0) {
+    const cents = Number(amountCents);
+
+    if (!txnId || !userId || !Number.isFinite(cents) || cents <= 0) {
       return res.status(400).json({
         ok: false,
         message: 'Invalid credit request.',
@@ -238,12 +245,15 @@ router.post('/wallet/credit', verifyProviderSignature, async (req, res) => {
         return;
       }
 
-      const amount = fromCents(amountCents);
+      const amount = fromCents(cents);
 
-      const user = await User.findByIdAndUpdate(
-        userId,
+      const user = await User.findOneAndUpdate(
         {
-          $inc: { balance: amount },
+          _id: userId,
+          status: 'active',
+        },
+        {
+          $inc: { wallet: amount },
         },
         {
           new: true,
@@ -252,13 +262,13 @@ router.post('/wallet/credit', verifyProviderSignature, async (req, res) => {
       );
 
       if (!user) {
-        throw new Error('User not found.');
+        throw new Error('User not found or account inactive.');
       }
 
       finalResponse = {
         ok: true,
-        balanceCents: toCents(user.balance),
-        currency,
+        balanceCents: toCents(user.wallet),
+        currency: user.currency || currency || 'BDT',
       };
 
       await ProviderWalletTxn.create(
@@ -268,8 +278,8 @@ router.post('/wallet/credit', verifyProviderSignature, async (req, res) => {
             type: 'credit',
             userId,
             sessionId,
-            amountCents,
-            currency,
+            amountCents: cents,
+            currency: user.currency || currency || 'BDT',
             roundId,
             betId,
             slot,
@@ -294,10 +304,97 @@ router.post('/wallet/credit', verifyProviderSignature, async (req, res) => {
 });
 
 router.post('/wallet/rollback', verifyProviderSignature, async (req, res) => {
-  return res.json({
-    ok: true,
-    message: 'Rollback endpoint ready.',
-  });
+  const session = await mongoose.startSession();
+
+  try {
+    const {
+      txnId,
+      originalTxnId,
+      userId,
+      amountCents,
+      currency = 'BDT',
+      sessionId,
+      roundId,
+      betId,
+      slot,
+      reason,
+    } = req.body;
+
+    const cents = Number(amountCents || 0);
+
+    if (!txnId || !userId || !Number.isFinite(cents) || cents <= 0) {
+      return res.status(400).json({
+        ok: false,
+        message: 'Invalid rollback request.',
+      });
+    }
+
+    let finalResponse;
+
+    await session.withTransaction(async () => {
+      const existing = await ProviderWalletTxn.findOne({ txnId }).session(session);
+
+      if (existing) {
+        finalResponse = existing.response;
+        return;
+      }
+
+      const amount = fromCents(cents);
+
+      const user = await User.findOneAndUpdate(
+        {
+          _id: userId,
+          status: 'active',
+        },
+        {
+          $inc: { wallet: amount },
+        },
+        {
+          new: true,
+          session,
+        }
+      );
+
+      if (!user) {
+        throw new Error('User not found or account inactive.');
+      }
+
+      finalResponse = {
+        ok: true,
+        balanceCents: toCents(user.wallet),
+        currency: user.currency || currency || 'BDT',
+      };
+
+      await ProviderWalletTxn.create(
+        [
+          {
+            txnId,
+            type: 'rollback',
+            userId,
+            sessionId,
+            amountCents: cents,
+            currency: user.currency || currency || 'BDT',
+            roundId,
+            betId,
+            slot,
+            response: finalResponse,
+            status: 'success',
+            multiplier: undefined,
+          },
+        ],
+        { session }
+      );
+    });
+
+    return res.json(finalResponse);
+  } catch (error) {
+    return res.status(400).json({
+      ok: false,
+      message: error.message || 'Rollback failed.',
+    });
+  } finally {
+    await session.endSession();
+  }
 });
 
 export default router;
