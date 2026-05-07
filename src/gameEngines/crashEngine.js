@@ -260,6 +260,9 @@ class CrashEngine {
     if (autoCashout) assertOrThrow(autoCashout >= 1.01 && autoCashout <= 100, 'Auto cashout must be between 1.01x and 100x', 400);
     assertOrThrow(this.round?.status === 'WAITING', 'Betting is closed for this round. Wait for the next round.', 400);
 
+    const account = await User.findById(userId).select('gameplayEnabled bettingEnabled status');
+    assertUserCanPlay(account);
+
     const session = await mongoose.startSession();
     let bet;
     let wallet;
