@@ -9,10 +9,12 @@ import {
   register,
   requestPasswordOtp,
   resendVerification,
+  sendEmailOtp,
   setNewPassword,
   updateProfile,
   updateProfilePicture,
   verifyEmail,
+  verifyEmailOtp,
   verifyPasswordOtp,
 } from '../controllers/authController.js';
 import { getDayWiseWalletStats } from '../controllers/userStatsController.js';
@@ -35,6 +37,8 @@ router.patch('/update-profile-picture', protect, profilePictureUpload, updatePro
 router.get('/verify-user/:token', verifyEmail);
 router.get('/verify-user', verifyEmail);
 router.post('/resend-verification', resendVerification);
+router.post('/send-email-otp', protect, sendEmailOtp);
+router.post('/verify-email-otp', protect, verifyEmailOtp);
 router.post('/reset-password', requestPasswordOtp);
 router.post('/verify-reset-password-otp', verifyPasswordOtp);
 router.post('/set-new-password', setNewPassword);
