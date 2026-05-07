@@ -8,6 +8,10 @@ export function sanitizeUser(user) {
   delete raw.passwordResetOtpHash;
   delete raw.passwordResetVerified;
   delete raw.emailVerificationToken;
+  delete raw.emailVerificationOtpHash;
+  delete raw.emailVerificationOtpExpiresAt;
+  delete raw.emailVerificationOtpAttempts;
+  delete raw.emailVerificationOtpLastSentAt;
   delete raw.__v;
 
   const publicEmail = getPublicEmail(raw.email);
