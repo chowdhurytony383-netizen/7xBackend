@@ -8,7 +8,7 @@ import AgentPaymentRequest from '../models/AgentPaymentRequest.js';
 import AgentTransaction from '../models/AgentTransaction.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { assertOrThrow } from '../utils/appError.js';
-import { optionalString, requireNumber } from '../utils/validation.js';
+import { optionalString, requireNumber, requireString } from '../utils/validation.js';
 import { creditWallet } from '../utils/wallet.js';
 import { sanitizeUser } from '../utils/sanitize.js';
 
