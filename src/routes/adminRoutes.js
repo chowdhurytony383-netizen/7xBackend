@@ -6,7 +6,9 @@ import {
   transactions,
   updateDepositStatus,
   updateGame,
+  transferUserBalanceToAgent,
   updateUser,
+  updateUserPermissions,
   updateUserStatus,
   updateUserVerification,
   updateWithdrawalStatus,
@@ -24,6 +26,8 @@ router.get('/users', users);
 router.get('/users/:userId', userDetails);
 router.patch('/users/:userId', updateUser);
 router.patch('/users/:userId/status', updateUserStatus);
+router.patch('/users/:userId/permissions', updateUserPermissions);
+router.post('/users/:userId/transfer-balance-to-agent', transferUserBalanceToAgent);
 router.patch('/users/:userId/verification', updateUserVerification);
 router.get('/deposits', deposits);
 router.patch('/deposits/:transactionId/status', updateDepositStatus);
