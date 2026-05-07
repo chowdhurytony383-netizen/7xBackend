@@ -20,10 +20,46 @@ function normalizeMethodKeys(keys) {
   )];
 }
 
+
+const COUNTRY_CURRENCY_MAP = {
+  BD: { country: 'Bangladesh', currency: 'BDT' },
+  IN: { country: 'India', currency: 'INR' },
+  PK: { country: 'Pakistan', currency: 'PKR' },
+  NP: { country: 'Nepal', currency: 'NPR' },
+  LK: { country: 'Sri Lanka', currency: 'LKR' },
+  US: { country: 'United States', currency: 'USD' },
+  GB: { country: 'United Kingdom', currency: 'GBP' },
+  AE: { country: 'United Arab Emirates', currency: 'AED' },
+  SA: { country: 'Saudi Arabia', currency: 'SAR' },
+  QA: { country: 'Qatar', currency: 'QAR' },
+  KW: { country: 'Kuwait', currency: 'KWD' },
+  MY: { country: 'Malaysia', currency: 'MYR' },
+  SG: { country: 'Singapore', currency: 'SGD' },
+  PH: { country: 'Philippines', currency: 'PHP' },
+  ID: { country: 'Indonesia', currency: 'IDR' },
+  TH: { country: 'Thailand', currency: 'THB' },
+  VN: { country: 'Vietnam', currency: 'VND' },
+  NG: { country: 'Nigeria', currency: 'NGN' },
+  GH: { country: 'Ghana', currency: 'GHS' },
+  KE: { country: 'Kenya', currency: 'KES' },
+  ZA: { country: 'South Africa', currency: 'ZAR' },
+  CM: { country: 'Cameroon', currency: 'XAF' },
+};
+
+function normalizeAgentCountryCurrency(payload = {}) {
+  const countryCode = optionalString(payload.countryCode, 5)?.toUpperCase() || 'BD';
+  const fallback = COUNTRY_CURRENCY_MAP[countryCode] || COUNTRY_CURRENCY_MAP.BD;
+  const country = optionalString(payload.country, 80) || fallback.country;
+  const currency = optionalString(payload.currency, 8)?.toUpperCase() || fallback.currency;
+
+  return { countryCode, country, currency };
+}
+
 export const createAgent = asyncHandler(async (req, res) => {
   const name = optionalString(req.body.name, 120) || 'Agent';
   const agentId = optionalString(req.body.agentId, 40)?.toUpperCase() || await createUniqueAgentId();
   const password = optionalString(req.body.password, 80) || generatePassword(10);
+  const countryCurrency = normalizeAgentCountryCurrency(req.body);
 
   const agent = await Agent.create({
     agentId,
@@ -32,6 +68,7 @@ export const createAgent = asyncHandler(async (req, res) => {
     createdBy: req.user?._id,
     status: 'active',
     balance: 0,
+    ...countryCurrency,
     // New agents start with no payment method access until Main Admin assigns methods.
     allowedPaymentMethodKeys: normalizeMethodKeys(req.body.allowedPaymentMethodKeys),
     adminNote: optionalString(req.body.note, 500) || '',
@@ -72,6 +109,31 @@ export const updateAgentStatus = asyncHandler(async (req, res) => {
 
   assertOrThrow(agent, 'Agent not found', 404);
   res.json({ success: true, message: 'Agent status updated', data: sanitizeAgent(agent) });
+});
+
+
+export const updateAgentProfile = asyncHandler(async (req, res) => {
+  const countryCurrency = normalizeAgentCountryCurrency(req.body);
+  const update = {
+    ...countryCurrency,
+  };
+
+  if (req.body.name !== undefined) {
+    update.name = optionalString(req.body.name, 120) || 'Agent';
+  }
+
+  if (req.body.note !== undefined) {
+    update.adminNote = optionalString(req.body.note, 500) || '';
+  }
+
+  const agent = await Agent.findByIdAndUpdate(
+    req.params.agentId,
+    update,
+    { new: true }
+  );
+
+  assertOrThrow(agent, 'Agent not found', 404);
+  res.json({ success: true, message: 'Agent profile updated', data: sanitizeAgent(agent), agent: sanitizeAgent(agent) });
 });
 
 export const topUpAgent = asyncHandler(async (req, res) => {
