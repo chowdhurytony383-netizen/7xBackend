@@ -35,6 +35,23 @@ const agentSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  countryCode: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    default: 'BD',
+  },
+  country: {
+    type: String,
+    trim: true,
+    default: 'Bangladesh',
+  },
+  currency: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    default: 'BDT',
+  },
   status: {
     type: String,
     enum: ['active', 'blocked'],
