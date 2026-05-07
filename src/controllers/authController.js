@@ -41,6 +41,50 @@ function getRefreshTokenFromRequest(req) {
     || '';
 }
 
+function generateEmailOtp() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function getOtpExpiryDate() {
+  const minutes = Number.isFinite(env.EMAIL_OTP_EXPIRES_MINUTES) && env.EMAIL_OTP_EXPIRES_MINUTES > 0
+    ? env.EMAIL_OTP_EXPIRES_MINUTES
+    : 10;
+  return new Date(Date.now() + minutes * 60 * 1000);
+}
+
+function getOtpCooldownMs() {
+  const seconds = Number.isFinite(env.EMAIL_OTP_RESEND_COOLDOWN_SECONDS) && env.EMAIL_OTP_RESEND_COOLDOWN_SECONDS >= 0
+    ? env.EMAIL_OTP_RESEND_COOLDOWN_SECONDS
+    : 60;
+  return seconds * 1000;
+}
+
+function getMaxEmailOtpAttempts() {
+  return Number.isFinite(env.EMAIL_OTP_MAX_ATTEMPTS) && env.EMAIL_OTP_MAX_ATTEMPTS > 0
+    ? env.EMAIL_OTP_MAX_ATTEMPTS
+    : 5;
+}
+
+function buildEmailOtpMessage(otp) {
+  const expires = Number.isFinite(env.EMAIL_OTP_EXPIRES_MINUTES) && env.EMAIL_OTP_EXPIRES_MINUTES > 0
+    ? env.EMAIL_OTP_EXPIRES_MINUTES
+    : 10;
+
+  return {
+    subject: '7XBET email verification OTP',
+    text: `Your 7XBET email verification code is ${otp}. This code will expire in ${expires} minutes. Do not share this code with anyone.`,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827">
+        <h2 style="margin:0 0 12px;color:#111827">7XBET Email Verification</h2>
+        <p>Your verification code is:</p>
+        <div style="font-size:28px;font-weight:800;letter-spacing:6px;margin:16px 0;color:#16a34a">${otp}</div>
+        <p>This code will expire in ${expires} minutes.</p>
+        <p style="color:#6b7280">Do not share this code with anyone.</p>
+      </div>
+    `,
+  };
+}
+
 export const register = asyncHandler(async (req, res) => {
   const name = requireString(req.body.name || req.body.fullName, 'Full Name', 2, 120);
   const email = requireEmail(req.body.email);
@@ -185,6 +229,10 @@ export const updateProfile = asyncHandler(async (req, res) => {
         req.user.isVerified = false;
         req.user.emailVerificationToken = '';
         req.user.emailVerificationExpires = undefined;
+        req.user.emailVerificationOtpHash = '';
+        req.user.emailVerificationOtpExpiresAt = undefined;
+        req.user.emailVerificationOtpAttempts = 0;
+        req.user.emailVerificationOtpLastSentAt = undefined;
       }
     }
   }
@@ -245,6 +293,72 @@ export const resendVerification = asyncHandler(async (req, res) => {
   if (user.isVerified) return res.json({ success: true, message: 'Email already verified' });
   await createAndSendVerification(user);
   res.json({ success: true, message: 'Verification email sent' });
+});
+
+export const sendEmailOtp = asyncHandler(async (req, res) => {
+  const email = requireEmail(req.body.email || req.user.email);
+
+  assertOrThrow(email === req.user.email, 'Please save this email in your profile before requesting OTP', 400);
+  assertOrThrow(!req.user.isVerified, 'Email already verified', 400);
+
+  const cooldownMs = getOtpCooldownMs();
+  if (req.user.emailVerificationOtpLastSentAt && cooldownMs > 0) {
+    const elapsed = Date.now() - new Date(req.user.emailVerificationOtpLastSentAt).getTime();
+    const remainingSeconds = Math.ceil((cooldownMs - elapsed) / 1000);
+    assertOrThrow(elapsed >= cooldownMs, `Please wait ${remainingSeconds} seconds before requesting another OTP`, 429);
+  }
+
+  const otp = generateEmailOtp();
+  req.user.emailVerificationOtpHash = hashValue(otp);
+  req.user.emailVerificationOtpExpiresAt = getOtpExpiryDate();
+  req.user.emailVerificationOtpAttempts = 0;
+  req.user.emailVerificationOtpLastSentAt = new Date();
+  await req.user.save();
+
+  const message = buildEmailOtpMessage(otp);
+  await sendMail({
+    to: req.user.email,
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+  });
+
+  res.json({
+    success: true,
+    message: 'Email verification OTP sent',
+    expiresInMinutes: env.EMAIL_OTP_EXPIRES_MINUTES || 10,
+  });
+});
+
+export const verifyEmailOtp = asyncHandler(async (req, res) => {
+  const otp = requireString(req.body.otp, 'OTP', 6, 6);
+
+  assertOrThrow(!req.user.isVerified, 'Email already verified', 400);
+  assertOrThrow(req.user.emailVerificationOtpHash, 'Please request an OTP first', 400);
+  assertOrThrow(req.user.emailVerificationOtpExpiresAt && req.user.emailVerificationOtpExpiresAt > new Date(), 'OTP expired. Please request a new OTP.', 400);
+  assertOrThrow((req.user.emailVerificationOtpAttempts || 0) < getMaxEmailOtpAttempts(), 'Too many wrong attempts. Please request a new OTP.', 429);
+
+  if (req.user.emailVerificationOtpHash !== hashValue(otp)) {
+    req.user.emailVerificationOtpAttempts = (req.user.emailVerificationOtpAttempts || 0) + 1;
+    await req.user.save();
+    throw new AppError('Invalid OTP', 400);
+  }
+
+  req.user.isVerified = true;
+  req.user.emailVerificationOtpHash = '';
+  req.user.emailVerificationOtpExpiresAt = undefined;
+  req.user.emailVerificationOtpAttempts = 0;
+  req.user.emailVerificationOtpLastSentAt = undefined;
+  req.user.emailVerificationToken = '';
+  req.user.emailVerificationExpires = undefined;
+  await req.user.save();
+
+  res.json({
+    success: true,
+    message: 'Email verified successfully',
+    data: sanitizeUser(req.user),
+    user: sanitizeUser(req.user),
+  });
 });
 
 export const requestPasswordOtp = asyncHandler(async (req, res) => {
