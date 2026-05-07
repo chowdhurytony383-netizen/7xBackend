@@ -16,7 +16,7 @@ const agentTransactionSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['TOP_UP', 'ADJUSTMENT', 'DEPOSIT_CONFIRM', 'WITHDRAW_CONFIRM', 'REQUEST_REJECT'],
+    enum: ['TOP_UP', 'ADJUSTMENT', 'DEPOSIT_CONFIRM', 'WITHDRAW_CONFIRM', 'REQUEST_REJECT', 'USER_BALANCE_TRANSFER'],
     default: 'TOP_UP',
   },
   amount: {
@@ -35,6 +35,16 @@ const agentTransactionSchema = new mongoose.Schema({
   note: {
     type: String,
     default: '',
+  },
+  sourceUser: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    index: true,
+  },
+  sourceUserId: {
+    type: String,
+    default: '',
+    index: true,
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

@@ -86,6 +86,17 @@ const userSchema = new mongoose.Schema({
   },
 
   wallet: { type: Number, default: 0, min: 0 },
+
+  // Main Admin account controls.
+  // false = user cannot use that feature, true/undefined = allowed.
+  gameplayEnabled: { type: Boolean, default: true },
+  bettingEnabled: { type: Boolean, default: true },
+  depositEnabled: { type: Boolean, default: true },
+  withdrawEnabled: { type: Boolean, default: true },
+  permissionNote: { type: String, default: '' },
+  permissionUpdatedAt: Date,
+  permissionUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
   isVerified: { type: Boolean, default: false },
 
   verificationStatus: {
@@ -109,10 +120,6 @@ const userSchema = new mongoose.Schema({
   tokenVersion: { type: Number, default: 0 },
   emailVerificationToken: { type: String, default: '' },
   emailVerificationExpires: Date,
-  emailVerificationOtpHash: { type: String, default: '' },
-  emailVerificationOtpExpiresAt: Date,
-  emailVerificationOtpAttempts: { type: Number, default: 0 },
-  emailVerificationOtpLastSentAt: Date,
   passwordResetOtpHash: { type: String, default: '' },
   passwordResetExpires: Date,
   passwordResetVerified: { type: Boolean, default: false },
@@ -155,10 +162,6 @@ userSchema.methods.toSafeObject = function toSafeObject() {
   delete raw.passwordResetOtpHash;
   delete raw.passwordResetVerified;
   delete raw.emailVerificationToken;
-  delete raw.emailVerificationOtpHash;
-  delete raw.emailVerificationOtpExpiresAt;
-  delete raw.emailVerificationOtpAttempts;
-  delete raw.emailVerificationOtpLastSentAt;
   delete raw.__v;
   return raw;
 };
