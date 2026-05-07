@@ -36,6 +36,17 @@ export const env = {
   API_RATE_LIMIT_WINDOW_MS: Number(process.env.API_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
   API_RATE_LIMIT_MAX: Number(process.env.API_RATE_LIMIT_MAX || 10000),
 
+  SMTP_HOST: process.env.SMTP_HOST || '',
+  SMTP_PORT: Number(process.env.SMTP_PORT || 465),
+  SMTP_SECURE: String(process.env.SMTP_SECURE || 'true').toLowerCase() === 'true',
+  SMTP_USER: process.env.SMTP_USER || '',
+  SMTP_PASS: process.env.SMTP_PASS || '',
+  MAIL_FROM_NAME: process.env.MAIL_FROM_NAME || process.env.APP_NAME || '7XBET',
+  MAIL_FROM_EMAIL: process.env.MAIL_FROM_EMAIL || process.env.SMTP_USER || '',
+  EMAIL_OTP_EXPIRES_MINUTES: Number(process.env.EMAIL_OTP_EXPIRES_MINUTES || 10),
+  EMAIL_OTP_RESEND_COOLDOWN_SECONDS: Number(process.env.EMAIL_OTP_RESEND_COOLDOWN_SECONDS || 60),
+  EMAIL_OTP_MAX_ATTEMPTS: Number(process.env.EMAIL_OTP_MAX_ATTEMPTS || 5),
+
   CRYPTO_PROVIDER: process.env.CRYPTO_PROVIDER || 'tatum',
   TATUM_API_KEY: process.env.TATUM_API_KEY || '',
   TATUM_API_BASE_URL: process.env.TATUM_API_BASE_URL || 'https://api.tatum.io',
