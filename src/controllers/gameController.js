@@ -7,6 +7,7 @@ import { AppError, assertOrThrow } from '../utils/appError.js';
 import { requireInteger, requireNumber, requireString } from '../utils/validation.js';
 import { randomFloat0To100, randomInt, randomToken, hashValue } from '../utils/random.js';
 import { creditWallet, debitWallet } from '../utils/wallet.js';
+import { assertUserCanPlay } from '../utils/userPermissions.js';
 
 async function findGame(slug) {
   const game = await Game.findOne({ slug, isActive: true });
@@ -20,6 +21,7 @@ export const getAllGames = asyncHandler(async (_req, res) => {
 });
 
 export const rollDice = asyncHandler(async (req, res) => {
+  assertUserCanPlay(req.user);
   const amount = requireNumber(req.body.amount, 'Bet amount', 1, 1_000_000);
   const condition = requireString(req.body.condition, 'Condition', 3, 10).toLowerCase();
   assertOrThrow(['above', 'below'].includes(condition), 'Condition must be above or below', 400);
@@ -75,6 +77,7 @@ function minesMultiplier(safeHits, minesCount) {
 }
 
 export const startMines = asyncHandler(async (req, res) => {
+  assertUserCanPlay(req.user);
   const amount = requireNumber(req.body.amount, 'Bet amount', 1, 1_000_000);
   const minesCount = requireInteger(req.body.minesCount, 'Mines count', 1, 24);
   const game = await findGame('mines');

@@ -1,6 +1,7 @@
 import CrashRound from '../models/CrashRound.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { crashEngine, roundPublic } from '../gameEngines/crashEngine.js';
+import { assertUserCanPlay } from '../utils/userPermissions.js';
 
 export const getCrashState = asyncHandler(async (req, res) => {
   const state = await crashEngine.stateForUser(req.user?._id);
@@ -8,6 +9,7 @@ export const getCrashState = asyncHandler(async (req, res) => {
 });
 
 export const placeCrashBet = asyncHandler(async (req, res) => {
+  assertUserCanPlay(req.user);
   const result = await crashEngine.placeBet(req.user._id, req.body.amount, req.body.autoCashout);
   res.status(201).json(result);
 });

@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import Game from '../models/Game.js';
 import { env } from '../config/env.js';
+import { assertUserCanPlay } from '../utils/userPermissions.js';
 
 const allowedSourceGames = {
   fortunetiger: {
@@ -49,6 +50,8 @@ async function ensureSourceGameRecord(gameConfig) {
 }
 
 export async function createSourceGameSession(req, res) {
+  assertUserCanPlay(req.user);
+
   const normalizedGameCode = String(req.params.gameCode || '')
     .toLowerCase()
     .trim()

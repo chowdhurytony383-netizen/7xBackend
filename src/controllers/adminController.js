@@ -5,11 +5,22 @@ import Bet from '../models/Bet.js';
 import Game from '../models/Game.js';
 import Agent from '../models/Agent.js';
 import AgentPaymentRequest from '../models/AgentPaymentRequest.js';
+import AgentTransaction from '../models/AgentTransaction.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { assertOrThrow } from '../utils/appError.js';
 import { optionalString, requireNumber } from '../utils/validation.js';
 import { creditWallet } from '../utils/wallet.js';
 import { sanitizeUser } from '../utils/sanitize.js';
+
+
+function boolFromBody(value, fallback = true) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'on', 'enabled', 'allow'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off', 'disabled', 'block'].includes(normalized)) return false;
+  return fallback;
+}
 
 function escapeRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -99,6 +110,124 @@ export const updateUser = asyncHandler(async (req, res) => {
   if (req.body.wallet !== undefined) user.wallet = requireNumber(req.body.wallet, 'Wallet', 0, 999_999_999);
   await user.save();
   res.json({ success: true, message: 'User updated', data: sanitizeUser(user) });
+});
+
+
+export const updateUserPermissions = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.userId);
+  assertOrThrow(user, 'User not found', 404);
+
+  if (req.body.gameplayEnabled !== undefined) {
+    user.gameplayEnabled = boolFromBody(req.body.gameplayEnabled, user.gameplayEnabled !== false);
+    user.bettingEnabled = user.gameplayEnabled;
+  }
+  if (req.body.bettingEnabled !== undefined) {
+    user.bettingEnabled = boolFromBody(req.body.bettingEnabled, user.bettingEnabled !== false);
+    user.gameplayEnabled = user.bettingEnabled;
+  }
+  if (req.body.depositEnabled !== undefined) {
+    user.depositEnabled = boolFromBody(req.body.depositEnabled, user.depositEnabled !== false);
+  }
+  if (req.body.withdrawEnabled !== undefined) {
+    user.withdrawEnabled = boolFromBody(req.body.withdrawEnabled, user.withdrawEnabled !== false);
+  }
+
+  user.permissionNote = optionalString(req.body.note, 500) || user.permissionNote || '';
+  user.permissionUpdatedAt = new Date();
+  user.permissionUpdatedBy = req.user?._id;
+
+  await user.save();
+
+  res.json({
+    success: true,
+    message: 'User permissions updated',
+    data: sanitizeUser(user),
+  });
+});
+
+export const transferUserBalanceToAgent = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.userId);
+  assertOrThrow(user, 'User not found', 404);
+
+  const agentId = requireString(req.body.agentId, 'Agent ID', 3, 40).toUpperCase();
+  const transferAll = Boolean(req.body.transferAll) || String(req.body.amount || '').toLowerCase() === 'all';
+  const currentBalance = Number(user.wallet || 0);
+  const amount = transferAll ? currentBalance : requireNumber(req.body.amount, 'Amount', 1, 999_999_999);
+  const note = optionalString(req.body.note, 500) || 'Main admin transferred user balance to agent';
+
+  assertOrThrow(amount > 0, 'Transfer amount must be greater than zero', 400);
+  assertOrThrow(currentBalance >= amount, 'User has insufficient balance for this transfer', 400);
+
+  const agent = await Agent.findOne({ agentId });
+  assertOrThrow(agent, 'Agent not found', 404);
+  assertOrThrow(agent.status === 'active', 'Agent is not active', 400);
+
+  const debitedUser = await User.findOneAndUpdate(
+    { _id: user._id, wallet: { $gte: amount } },
+    {
+      $inc: { wallet: -amount },
+      $set: {
+        permissionNote: note,
+        permissionUpdatedAt: new Date(),
+        permissionUpdatedBy: req.user?._id,
+      },
+    },
+    { new: true }
+  );
+
+  assertOrThrow(debitedUser, 'User has insufficient balance for this transfer', 400);
+
+  const balanceBefore = Number(agent.balance || 0);
+  agent.balance = Number((balanceBefore + amount).toFixed(2));
+  await agent.save();
+
+  const sourceUserId = debitedUser.userId || debitedUser.username || debitedUser._id.toString();
+
+  const [agentTransaction, userTransaction] = await Promise.all([
+    AgentTransaction.create({
+      agent: agent._id,
+      agentId: agent.agentId,
+      type: 'USER_BALANCE_TRANSFER',
+      amount,
+      balanceBefore,
+      balanceAfter: agent.balance,
+      note: `${note}\nFrom user: ${sourceUserId}`,
+      sourceUser: debitedUser._id,
+      sourceUserId,
+      createdBy: req.user?._id,
+    }),
+    Transaction.create({
+      user: debitedUser._id,
+      type: 'WITHDRAW',
+      amount,
+      status: 'SUCCESS',
+      method: 'admin-transfer-to-agent',
+      agent: agent._id,
+      agentId: agent.agentId,
+      methodKey: 'admin-transfer-to-agent',
+      userNote: `Main admin transferred balance to Agent ${agent.agentId}`,
+      adminNote: note,
+      processedAt: new Date(),
+      processedBy: req.user?._id,
+      gatewayPayload: {
+        source: 'admin-user-balance-transfer-to-agent',
+        agentId: agent.agentId,
+        balanceBefore: currentBalance,
+        balanceAfter: debitedUser.wallet,
+      },
+    }),
+  ]);
+
+  res.json({
+    success: true,
+    message: 'User balance transferred to agent panel',
+    data: {
+      user: sanitizeUser(debitedUser),
+      agent: typeof agent.toSafeObject === 'function' ? agent.toSafeObject() : agent,
+      agentTransaction,
+      transaction: userTransaction,
+    },
+  });
 });
 
 export const updateUserStatus = asyncHandler(async (req, res) => {

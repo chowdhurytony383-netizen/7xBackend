@@ -15,14 +15,17 @@ import { processCryptoWebhookPayload } from '../services/cryptoWebhookService.js
 import { syncTatumSubscriptions } from '../services/cryptoSubscriptionService.js';
 import { getCryptoWithdrawOptions, createCryptoWithdrawalRequest } from '../services/cryptoWithdrawService.js';
 import { requireNumber, requireString, optionalString } from '../utils/validation.js';
+import { assertUserCanDeposit, assertUserCanWithdraw } from '../utils/userPermissions.js';
 
 export const myCryptoAddresses = asyncHandler(async (req, res) => {
+  assertUserCanDeposit(req.user);
   const items = await ensureUserCryptoAddresses(req.user);
   const data = items.map(toCryptoAddressDto);
   res.json({ success: true, data, addresses: data });
 });
 
 export const refreshMyCryptoAddresses = asyncHandler(async (req, res) => {
+  assertUserCanDeposit(req.user);
   await UserCryptoAddress.deleteMany({ user: req.user._id, status: { $ne: 'active' } });
   const items = await ensureUserCryptoAddresses(req.user);
   const data = items.map(toCryptoAddressDto);
@@ -35,12 +38,14 @@ export const myCryptoDeposits = asyncHandler(async (req, res) => {
 });
 
 
-export const cryptoWithdrawOptions = asyncHandler(async (_req, res) => {
+export const cryptoWithdrawOptions = asyncHandler(async (req, res) => {
+  assertUserCanWithdraw(req.user);
   const options = await getCryptoWithdrawOptions();
   res.json({ success: true, data: options, options });
 });
 
 export const createCryptoWithdrawal = asyncHandler(async (req, res) => {
+  assertUserCanWithdraw(req.user);
   const methodKey = requireString(req.body.methodKey || req.body.key, 'Crypto method', 2, 40).toUpperCase();
   const amountFiat = requireNumber(req.body.amount || req.body.amountFiat, 'Amount', 1, 1_000_000);
   const toAddress = requireString(req.body.address || req.body.toAddress, 'Wallet address', 20, 160);

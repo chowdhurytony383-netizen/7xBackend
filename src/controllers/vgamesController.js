@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import Game from '../models/Game.js';
 import Bet from '../models/Bet.js';
 import { env } from '../config/env.js';
+import { assertUserCanPlay } from '../utils/userPermissions.js';
 
 const SLOT_SYMBOLS = ['Symbol_1', 'Symbol_2', 'Symbol_3', 'Symbol_4', 'Symbol_5', 'Symbol_6'];
 const WILD_SYMBOLS = new Set(['Symbol_0', 'Wild', 'wild']);
@@ -1492,8 +1493,14 @@ export async function handleVGameAction(req, res) {
   if (action === 'session') return res.json(isBikini ? bikiniSessionPayload(user, token) : sessionPayload(user, token));
   if (action === 'icons') return res.json(isBikini ? bikiniIconsPayload() : iconsPayload());
   if (action === 'rules') return res.json(isBikini ? bikiniRulesPayload() : rulesPayload());
-  if (action === 'spin') return isBikini ? handleBikiniSpin(req, res, user, game) : handleSpin(req, res, user, game);
-  if (action === 'buy') return isBikini ? handleBikiniSpin(req, res, user, game) : handleSpin(req, res, user, game);
+  if (action === 'spin') {
+    assertUserCanPlay(user);
+    return isBikini ? handleBikiniSpin(req, res, user, game) : handleSpin(req, res, user, game);
+  }
+  if (action === 'buy') {
+    assertUserCanPlay(user);
+    return isBikini ? handleBikiniSpin(req, res, user, game) : handleSpin(req, res, user, game);
+  }
   if (action === 'logs') return handleHistories(req, res, user, game, { legacyArray: true });
   if (action === 'histories') return handleHistories(req, res, user, game);
   if (action === 'history_detail') return handleHistoryDetailAction(req, res, user, game);

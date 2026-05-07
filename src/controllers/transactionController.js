@@ -11,6 +11,7 @@ import { requireNumber, optionalString, requireString } from '../utils/validatio
 import { creditWallet, debitWallet } from '../utils/wallet.js';
 import { env } from '../config/env.js';
 import { groupDepositMethodsByTitle, pickPrimaryDepositMethod } from '../utils/paymentMethodCanonical.js';
+import { assertUserCanDeposit, assertUserCanWithdraw } from '../utils/userPermissions.js';
 
 function razorpayClient() {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) return null;
@@ -23,6 +24,7 @@ export const getMyTransactions = asyncHandler(async (req, res) => {
 });
 
 export const createWithdrawTransaction = asyncHandler(async (req, res) => {
+  assertUserCanWithdraw(req.user);
   const amount = requireNumber(req.body.amount, 'Amount', 1, 1_000_000);
   const type = String(req.body.type || 'WITHDRAW').toUpperCase();
   assertOrThrow(type === 'WITHDRAW', 'Only WITHDRAW transactions can be created here', 400);
@@ -51,6 +53,7 @@ export const createWithdrawTransaction = asyncHandler(async (req, res) => {
 });
 
 export const createDepositOrder = asyncHandler(async (req, res) => {
+  assertUserCanDeposit(req.user);
   const amount = requireNumber(req.body.amount, 'Amount', 1, 1_000_000);
   const transaction = await Transaction.create({ user: req.user._id, type: 'DEPOSIT', amount, status: 'PENDING', method: 'razorpay' });
 
@@ -82,6 +85,7 @@ export const createDepositOrder = asyncHandler(async (req, res) => {
 });
 
 export const verifyDepositPayment = asyncHandler(async (req, res) => {
+  assertUserCanDeposit(req.user);
   const transactionId = req.body.transactionId;
   const transaction = await Transaction.findOne({ _id: transactionId, user: req.user._id, type: 'DEPOSIT' });
   assertOrThrow(transaction, 'Deposit transaction not found', 404);
@@ -178,7 +182,8 @@ function pickRandomItem(items) {
   return items[crypto.randomInt(items.length)];
 }
 
-export const getAgentDepositOptions = asyncHandler(async (_req, res) => {
+export const getAgentDepositOptions = asyncHandler(async (req, res) => {
+  assertUserCanDeposit(req.user);
   const globalMethods = await getGlobalDepositMethods(true);
   const methodGroups = groupDepositMethodsByTitle(globalMethods);
   const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(500);
@@ -239,7 +244,8 @@ export const getAgentDepositOptions = asyncHandler(async (_req, res) => {
 });
 
 
-export const getAgentWithdrawOptions = asyncHandler(async (_req, res) => {
+export const getAgentWithdrawOptions = asyncHandler(async (req, res) => {
+  assertUserCanWithdraw(req.user);
   const globalMethods = await getGlobalDepositMethods(true);
   const methodGroups = groupDepositMethodsByTitle(globalMethods);
   const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(500);
@@ -298,6 +304,7 @@ export const getAgentWithdrawOptions = asyncHandler(async (_req, res) => {
 });
 
 export const createAgentDepositRequest = asyncHandler(async (req, res) => {
+  assertUserCanDeposit(req.user);
   const amount = requireNumber(req.body.amount, 'Amount', 1, 1_000_000);
   const agentId = requireString(req.body.agentId, 'Agent ID', 3, 40).toUpperCase();
   const methodKey = requireString(req.body.methodKey, 'Payment method', 2, 50).toLowerCase();
@@ -381,6 +388,7 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
 });
 
 export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
+  assertUserCanWithdraw(req.user);
   const amount = requireNumber(req.body.amount, 'Amount', 1, 1_000_000);
   const agentId = optionalString(req.body.agentId, 40)?.toUpperCase();
   const methodKey = optionalString(req.body.methodKey, 50)?.toLowerCase() || optionalString(req.body.method, 50)?.toLowerCase();
