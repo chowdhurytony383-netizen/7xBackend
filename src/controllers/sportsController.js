@@ -10,7 +10,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/appError.js';
 import { syncSportsAll, syncSportsOdds, syncSportsScores } from '../services/freeSportsProviderService.js';
 import { placeSportsBet, settleOpenSportsBets } from '../services/sportsBettingService.js';
-import { getSportmonksMatchDetails } from '../services/sportmonksDetailsService.js';
+import { getSportsMatchDetails, sportsDetailsConfigured } from '../services/sportsDetailsService.js';
 
 let backgroundSportsSyncPromise = null;
 let liveMatchesCache = { createdAt: 0, payload: null };
@@ -431,7 +431,7 @@ export const eventDetails = asyncHandler(async (req, res) => {
 
   const [market, details] = await Promise.all([
     SportsAutoMarket.findOne({ event: event._id }).sort({ updatedAt: -1 }).lean(),
-    getSportmonksMatchDetails(event),
+    getSportsMatchDetails(event),
   ]);
 
   const formattedEvent = formatAutoEventFromMarket(event, market);
@@ -513,8 +513,9 @@ export const syncStatus = asyncHandler(async (_req, res) => {
     data: {
       provider: sportsProviderName(),
       enabled: sportsApiKeyConfigured(),
-      detailsProvider: process.env.SPORTS_DETAILS_PROVIDER || '',
-      detailsEnabled: String(process.env.SPORTS_DETAILS_ENABLED || '').toLowerCase() === 'true' && Boolean(process.env.SPORTMONKS_API_TOKEN),
+      detailsProvider: process.env.SPORTS_DETAILS_PROVIDER || 'hybrid',
+      detailsEnabled: sportsDetailsConfigured(),
+      multiDetailsProvider: process.env.SPORTS_MULTI_DETAILS_ENABLED || '',
       autoSettlement: Boolean(process.env.SPORTS_AUTO_SETTLEMENT_ENABLED === 'true'),
       events,
       openBets,
