@@ -129,6 +129,60 @@ function normalizeSelectionId(eventId, marketKey, name, point) {
   return stableId(eventId, marketKey, name, String(point ?? ''));
 }
 
+function syntheticDrawSelectionId(eventId, marketKey = 'h2h') {
+  return stableId(eventId, marketKey, 'Draw', 'synthetic');
+}
+
+function syntheticDrawOdds() {
+  const value = Number(process.env.SPORTS_SYNTHETIC_DRAW_ODDS || process.env.SPORTS_DRAW_ODDS || 3.25);
+  return Number.isFinite(value) && value > 1 ? value : 3.25;
+}
+
+function sportAllowsDraw(sportKey = '', sportTitle = '') {
+  if (bool(process.env.SPORTS_DRAW_FOR_ALL, true)) return true;
+  if (bool(process.env.SPORTS_SYNTHETIC_DRAW_ENABLED, true) === false) return false;
+
+  const clean = `${sportKey || ''} ${sportTitle || ''}`.toLowerCase();
+  return (
+    clean.includes('soccer')
+    || clean.includes('football')
+    || clean.includes('cricket')
+    || clean.includes('hockey')
+    || clean.includes('rugby')
+    || clean.includes('boxing')
+    || clean.includes('mma')
+  );
+}
+
+function hasDrawSelection(selections = []) {
+  return selections.some((selection) => {
+    const name = String(selection?.name || '').trim().toLowerCase();
+    return name === 'draw' || name === 'tie';
+  });
+}
+
+function withSyntheticDrawSelection(selections = [], providerEventId, marketKey, sportKey, sportTitle) {
+  if (marketKey !== 'h2h') return selections;
+  if (!sportAllowsDraw(sportKey, sportTitle)) return selections;
+  if (hasDrawSelection(selections)) return selections;
+
+  const openSelections = selections.filter((selection) => Number(selection?.price || 0) > 1);
+  if (openSelections.length !== 2) return selections;
+
+  const price = syntheticDrawOdds();
+  return [
+    ...selections,
+    {
+      selectionId: syntheticDrawSelectionId(providerEventId, marketKey),
+      name: 'Draw',
+      price,
+      lastPrice: price,
+      point: null,
+      status: 'OPEN',
+    },
+  ];
+}
+
 function pickBookmaker(bookmakers = []) {
   if (!Array.isArray(bookmakers) || !bookmakers.length) return null;
   const preferred = csv(env.SPORTS_PREFERRED_BOOKMAKERS || 'bet365,pinnacle,williamhill,betfair,unibet');
@@ -216,7 +270,7 @@ async function upsertOddsEvent(providerEvent, sportKey) {
     const marketKey = providerMarket.key || 'h2h';
     if (!marketKeys.includes(marketKey)) continue;
 
-    const selections = (providerMarket.outcomes || [])
+    const providerSelections = (providerMarket.outcomes || [])
       .map((outcome) => ({
         selectionId: normalizeSelectionId(providerEventId, marketKey, outcome.name, outcome.point),
         name: outcome.name,
@@ -226,6 +280,8 @@ async function upsertOddsEvent(providerEvent, sportKey) {
         status: Number(outcome.price || 0) > 1 ? 'OPEN' : 'SUSPENDED',
       }))
       .filter((selection) => selection.name && selection.price > 1);
+
+    const selections = withSyntheticDrawSelection(providerSelections, providerEventId, marketKey, providerEvent.sport_key || sportKey, sportTitle);
 
     if (!selections.length) continue;
 

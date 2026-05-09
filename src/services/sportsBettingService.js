@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 import { customAlphabet } from 'nanoid';
 
 import { env } from '../config/env.js';
@@ -17,6 +19,50 @@ function roundMoney(value) {
 
 function normalizeName(value = '') {
   return String(value || '').trim().toLowerCase();
+}
+
+function boolEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === '') return fallback;
+  return String(value).toLowerCase() === 'true';
+}
+
+function stableId(...parts) {
+  return crypto.createHash('sha1').update(parts.filter(Boolean).join('|')).digest('hex').slice(0, 24);
+}
+
+function syntheticDrawSelectionId(event, marketKey = 'h2h') {
+  const providerEventId = event?.providerEventId || String(event?._id || event?.id || '');
+  return stableId(providerEventId, marketKey, 'Draw', 'synthetic');
+}
+
+function syntheticDrawOdds() {
+  const value = Number(process.env.SPORTS_SYNTHETIC_DRAW_ODDS || process.env.SPORTS_DRAW_ODDS || 3.25);
+  return Number.isFinite(value) && value > 1 ? value : 3.25;
+}
+
+function sportAllowsDraw(event = {}) {
+  if (boolEnv('SPORTS_DRAW_FOR_ALL', true)) return true;
+  if (boolEnv('SPORTS_SYNTHETIC_DRAW_ENABLED', true) === false) return false;
+
+  const clean = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.league || ''}`.toLowerCase();
+  return (
+    clean.includes('soccer')
+    || clean.includes('football')
+    || clean.includes('cricket')
+    || clean.includes('hockey')
+    || clean.includes('rugby')
+    || clean.includes('boxing')
+    || clean.includes('mma')
+  );
+}
+
+function canUseSyntheticDraw(event, marketKey, selectionId) {
+  return (
+    marketKey === 'h2h'
+    && sportAllowsDraw(event)
+    && selectionId === syntheticDrawSelectionId(event, marketKey)
+  );
 }
 
 function scoreForTeam(event, teamName) {
@@ -66,7 +112,17 @@ export async function placeSportsBet({ user, eventId, marketKey = 'h2h', selecti
     if (age > staleSeconds) throw new AppError('Odds are updating. Please try again shortly.', 409);
   }
 
-  const selection = market.selections.find((item) => item.selectionId === selectionId && item.status === 'OPEN');
+  let selection = market.selections.find((item) => item.selectionId === selectionId && item.status === 'OPEN');
+
+  if (!selection && canUseSyntheticDraw(event, marketKey, selectionId)) {
+    selection = {
+      selectionId: syntheticDrawSelectionId(event, marketKey),
+      name: 'Draw',
+      price: syntheticDrawOdds(),
+      status: 'OPEN',
+    };
+  }
+
   if (!selection) throw new AppError('Selection is not available', 404);
 
   const odds = Number(selection.price);
