@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 import SportsCategory from '../models/SportsCategory.js';
 import SportsMatch from '../models/SportsMatch.js';
 import SportsAutoEvent from '../models/SportsAutoEvent.js';
@@ -94,9 +96,80 @@ function scoreValue(event, teamName) {
   return Number(found?.score || 0);
 }
 
-function marketToOdds(market) {
+function boolEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === '') return fallback;
+  return String(value).toLowerCase() === 'true';
+}
+
+function stableId(...parts) {
+  return crypto.createHash('sha1').update(parts.filter(Boolean).join('|')).digest('hex').slice(0, 24);
+}
+
+function syntheticDrawSelectionId(event, marketKey = 'h2h') {
+  const providerEventId = event?.providerEventId || String(event?._id || event?.id || '');
+  return stableId(providerEventId, marketKey, 'Draw', 'synthetic');
+}
+
+function syntheticDrawOdds() {
+  const value = Number(process.env.SPORTS_SYNTHETIC_DRAW_ODDS || process.env.SPORTS_DRAW_ODDS || 3.25);
+  return Number.isFinite(value) && value > 1 ? value : 3.25;
+}
+
+function sportAllowsDraw(event = {}) {
+  if (boolEnv('SPORTS_DRAW_FOR_ALL', true)) return true;
+  if (boolEnv('SPORTS_SYNTHETIC_DRAW_ENABLED', true) === false) return false;
+
+  const clean = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.sport || ''} ${event.league || ''}`.toLowerCase();
+  return (
+    clean.includes('soccer')
+    || clean.includes('football')
+    || clean.includes('cricket')
+    || clean.includes('hockey')
+    || clean.includes('rugby')
+    || clean.includes('boxing')
+    || clean.includes('mma')
+  );
+}
+
+function hasDrawSelection(selections = []) {
+  return selections.some((selection) => {
+    const name = String(selection?.name || selection?.label || '').trim().toLowerCase();
+    return name === 'draw' || name === 'tie';
+  });
+}
+
+function withSyntheticDraw(selections = [], event = {}, marketKey = 'h2h') {
+  if (marketKey !== 'h2h') return selections;
+  if (!sportAllowsDraw(event)) return selections;
+  if (hasDrawSelection(selections)) return selections;
+
+  const openSelections = selections.filter((selection) => Number(selection?.price || selection?.odds || selection?.value || 0) > 1);
+  if (openSelections.length !== 2) return selections;
+
+  const drawId = syntheticDrawSelectionId(event, marketKey);
+  const drawOdds = syntheticDrawOdds();
+
+  return [
+    ...selections,
+    {
+      selectionId: drawId,
+      key: drawId,
+      name: 'Draw',
+      label: 'Draw',
+      value: drawOdds,
+      odds: drawOdds,
+      price: drawOdds,
+      marketKey,
+      marketName: 'Match Winner',
+      isSyntheticDraw: true,
+    },
+  ];
+}
+
+function marketToOdds(market, event = {}) {
   if (!market) return [];
-  return (market.selections || []).slice(0, 9).map((selection) => ({
+  const mapped = (market.selections || []).map((selection) => ({
     key: selection.selectionId,
     selectionId: selection.selectionId,
     label: selection.name,
@@ -107,11 +180,13 @@ function marketToOdds(market) {
     marketKey: market.marketKey,
     marketName: market.marketName,
   }));
+
+  return withSyntheticDraw(mapped, event, market.marketKey).slice(0, 9);
 }
 
 async function formatAutoEvent(event) {
   const market = await SportsAutoMarket.findOne({ event: event._id, status: 'OPEN' }).sort({ updatedAt: -1 });
-  const odds = marketToOdds(market);
+  const odds = marketToOdds(market, event);
   const homeScore = scoreValue(event, event.homeTeam);
   const awayScore = scoreValue(event, event.awayTeam);
   const status = event.completed ? 'Finished' : event.status === 'LIVE' ? 'Live' : 'Upcoming';
