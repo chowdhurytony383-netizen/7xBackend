@@ -80,6 +80,27 @@ export const env = {
   CRYPTO_AUTO_SWEEP_ON_CREDIT: String(process.env.CRYPTO_AUTO_SWEEP_ON_CREDIT || 'false').toLowerCase() === 'true',
   CRYPTO_AUTO_SWEEP_COINS: process.env.CRYPTO_AUTO_SWEEP_COINS || 'BNB',
 
+
+  // Free/low-cost automatic sports betting system.
+  // Requires a free odds API key such as The Odds API.
+  SPORTS_AUTO_SYSTEM_ENABLED: String(process.env.SPORTS_AUTO_SYSTEM_ENABLED || 'true').toLowerCase() === 'true',
+  SPORTS_AUTO_SYNC_ON_REQUEST: String(process.env.SPORTS_AUTO_SYNC_ON_REQUEST || 'true').toLowerCase() === 'true',
+  SPORTS_ODDS_PROVIDER: process.env.SPORTS_ODDS_PROVIDER || 'theoddsapi',
+  SPORTS_ODDS_API_KEY: process.env.SPORTS_ODDS_API_KEY || '',
+  SPORTS_AUTO_SPORT_KEYS: process.env.SPORTS_AUTO_SPORT_KEYS || 'soccer_epl,soccer_uefa_champs_league,cricket_test_match,cricket_odi,cricket_t20,basketball_nba,tennis_atp_singles,tennis_wta_singles',
+  SPORTS_DEFAULT_REGIONS: process.env.SPORTS_DEFAULT_REGIONS || 'us,uk,eu',
+  SPORTS_DEFAULT_MARKETS: process.env.SPORTS_DEFAULT_MARKETS || 'h2h',
+  SPORTS_ODDS_FORMAT: process.env.SPORTS_ODDS_FORMAT || 'decimal',
+  SPORTS_PREFERRED_BOOKMAKERS: process.env.SPORTS_PREFERRED_BOOKMAKERS || 'bet365,pinnacle,williamhill,betfair,unibet',
+  SPORTS_ODDS_SYNC_TTL_SECONDS: Number(process.env.SPORTS_ODDS_SYNC_TTL_SECONDS || 60),
+  SPORTS_SCORE_SYNC_TTL_SECONDS: Number(process.env.SPORTS_SCORE_SYNC_TTL_SECONDS || 90),
+  SPORTS_ODDS_STALE_SECONDS: Number(process.env.SPORTS_ODDS_STALE_SECONDS || 900),
+  SPORTS_MIN_STAKE: Number(process.env.SPORTS_MIN_STAKE || 1),
+  SPORTS_MAX_STAKE: Number(process.env.SPORTS_MAX_STAKE || 500),
+  SPORTS_AUTO_SETTLEMENT_ENABLED: String(process.env.SPORTS_AUTO_SETTLEMENT_ENABLED || 'true').toLowerCase() === 'true',
+  SPORTS_AUTO_SETTLEMENT_MIN_DELAY_MINUTES: Number(process.env.SPORTS_AUTO_SETTLEMENT_MIN_DELAY_MINUTES || 15),
+  SPORTS_AUTO_REVIEW_ABOVE_AMOUNT: Number(process.env.SPORTS_AUTO_REVIEW_ABOVE_AMOUNT || 0),
+
   // Kept only for old direct_test compatibility. Do not use in production.
   TATUM_BSC_MNEMONIC: process.env.TATUM_BSC_MNEMONIC || '',
 };
