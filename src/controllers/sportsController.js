@@ -9,6 +9,22 @@ import { AppError } from '../utils/appError.js';
 import { syncSportsAll, syncSportsOdds, syncSportsScores } from '../services/freeSportsProviderService.js';
 import { placeSportsBet, settleOpenSportsBets } from '../services/sportsBettingService.js';
 
+
+function visibleEventCutoff() {
+  const hours = Math.max(1, Number(process.env.SPORTS_HIDE_STARTED_OLDER_HOURS || 24));
+  return new Date(Date.now() - hours * 60 * 60 * 1000);
+}
+
+function visibleEventFilter(extra = {}) {
+  return {
+    isActive: true,
+    completed: { $ne: true },
+    status: { $in: ['LIVE', 'UPCOMING'] },
+    commenceTime: { $gte: visibleEventCutoff() },
+    ...extra,
+  };
+}
+
 function teamObject(name) {
   return { name, displayName: name, logo: '', image: '', flag: '' };
 }
@@ -91,7 +107,7 @@ export const categories = asyncHandler(async (_req, res) => {
 export const liveMatches = asyncHandler(async (_req, res) => {
   await maybeAutoSync();
 
-  const autoEvents = await SportsAutoEvent.find({ isActive: true, status: { $in: ['LIVE', 'UPCOMING', 'FINISHED'] } })
+  const autoEvents = await SportsAutoEvent.find(visibleEventFilter())
     .sort({ status: 1, commenceTime: 1, updatedAt: -1 })
     .limit(100);
 
@@ -107,7 +123,7 @@ export const liveMatches = asyncHandler(async (_req, res) => {
 export const matchOfTheDay = asyncHandler(async (_req, res) => {
   await maybeAutoSync();
 
-  const event = await SportsAutoEvent.findOne({ isActive: true, status: { $in: ['LIVE', 'UPCOMING'] } }).sort({ status: 1, commenceTime: 1 });
+  const event = await SportsAutoEvent.findOne(visibleEventFilter()).sort({ status: 1, commenceTime: 1 });
   if (event) {
     const match = await formatAutoEvent(event);
     return res.json({ success: true, data: match, match, matchOfTheDay: match, event: match });
@@ -159,7 +175,7 @@ export const syncStatus = asyncHandler(async (_req, res) => {
     SportsSyncLog.findOne({ type: 'odds' }).sort({ createdAt: -1 }),
     SportsSyncLog.findOne({ type: 'scores' }).sort({ createdAt: -1 }),
     SportsSyncLog.findOne({ type: 'settlement' }).sort({ createdAt: -1 }),
-    SportsAutoEvent.countDocuments({ isActive: true }),
+    SportsAutoEvent.countDocuments(visibleEventFilter()),
     SportsAutoBet.countDocuments({ status: 'OPEN' }),
   ]);
 

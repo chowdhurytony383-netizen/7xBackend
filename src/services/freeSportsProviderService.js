@@ -61,6 +61,44 @@ function nowStatus(commenceTime) {
   return 'LIVE';
 }
 
+
+
+function oldEventCutoff() {
+  const hours = Math.max(1, Number(env.SPORTS_HIDE_STARTED_OLDER_HOURS || 24));
+  return new Date(Date.now() - hours * 60 * 60 * 1000);
+}
+
+async function deactivateStaleSportsEvents() {
+  const cutoff = oldEventCutoff();
+  const staleEvents = await SportsAutoEvent.find({
+    provider: 'theoddsapi',
+    isActive: true,
+    $or: [
+      { completed: true },
+      { status: 'FINISHED' },
+      { commenceTime: { $lt: cutoff } },
+    ],
+  }).select('providerEventId');
+
+  if (!staleEvents.length) return { deactivatedEvents: 0, closedMarkets: 0, cutoff };
+
+  const eventIds = staleEvents.map((event) => event.providerEventId);
+  const eventsResult = await SportsAutoEvent.updateMany(
+    { provider: 'theoddsapi', providerEventId: { $in: eventIds } },
+    { $set: { isActive: false, status: 'FINISHED', lastProviderUpdate: new Date() } }
+  );
+  const marketsResult = await SportsAutoMarket.updateMany(
+    { provider: 'theoddsapi', providerEventId: { $in: eventIds } },
+    { $set: { status: 'CLOSED' } }
+  );
+
+  return {
+    deactivatedEvents: eventsResult.modifiedCount || 0,
+    closedMarkets: marketsResult.modifiedCount || 0,
+    cutoff,
+  };
+}
+
 function normalizeMarketName(key) {
   const names = {
     h2h: 'Match Winner',
@@ -196,6 +234,9 @@ async function syncTheOddsApiOdds() {
     }
   }
 
+  const cleanup = await deactivateStaleSportsEvents();
+  stats.cleanup = cleanup;
+
   await SportsSyncLog.create({
     type: 'odds',
     provider: 'theoddsapi',
@@ -262,6 +303,9 @@ async function syncTheOddsApiScores() {
     }
   }
 
+  const cleanup = await deactivateStaleSportsEvents();
+  stats.cleanup = cleanup;
+
   await SportsSyncLog.create({
     type: 'scores',
     provider: 'theoddsapi',
@@ -313,4 +357,8 @@ export async function syncSportsAll(options = {}) {
     odds: odds.status === 'fulfilled' ? odds.value : { failed: true, message: odds.reason?.message },
     scores: scores.status === 'fulfilled' ? scores.value : { failed: true, message: scores.reason?.message },
   };
+}
+
+export async function clearStaleSportsEvents() {
+  return deactivateStaleSportsEvents();
 }
