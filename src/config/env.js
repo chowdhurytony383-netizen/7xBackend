@@ -110,6 +110,15 @@ export const env = {
   SPORTS_RESPONSE_MATCH_LIMIT: Number(process.env.SPORTS_RESPONSE_MATCH_LIMIT || 80),
   SPORTS_SETTLEMENT_SYNC_TTL_SECONDS: Number(process.env.SPORTS_SETTLEMENT_SYNC_TTL_SECONDS || 120),
 
+  SPORTS_DETAILS_ENABLED: String(process.env.SPORTS_DETAILS_ENABLED || 'false').toLowerCase() === 'true',
+  SPORTS_DETAILS_PROVIDER: process.env.SPORTS_DETAILS_PROVIDER || '',
+  SPORTMONKS_API_TOKEN: process.env.SPORTMONKS_API_TOKEN || '',
+  SPORTMONKS_BASE_URL: process.env.SPORTMONKS_BASE_URL || 'https://api.sportmonks.com/v3/football',
+  SPORTMONKS_INCLUDE: process.env.SPORTMONKS_INCLUDE || '',
+  SPORTS_DETAILS_CACHE_SECONDS: Number(process.env.SPORTS_DETAILS_CACHE_SECONDS || 120),
+  SPORTS_DETAILS_TIMEOUT_MS: Number(process.env.SPORTS_DETAILS_TIMEOUT_MS || 12000),
+  SPORTS_DETAILS_MATCH_THRESHOLD: Number(process.env.SPORTS_DETAILS_MATCH_THRESHOLD || 0.35),
+
   // Kept only for old direct_test compatibility. Do not use in production.
   TATUM_BSC_MNEMONIC: process.env.TATUM_BSC_MNEMONIC || '',
 };
