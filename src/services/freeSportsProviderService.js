@@ -40,7 +40,7 @@ function stableId(...parts) {
   return crypto.createHash('sha1').update(parts.filter(Boolean).join('|')).digest('hex').slice(0, 24);
 }
 
-async function fetchJson(url, timeoutMs = 25000) {
+async function fetchJson(url, timeoutMs = Number(env.SPORTS_PROVIDER_TIMEOUT_MS || 12000)) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -216,7 +216,7 @@ async function fetchActiveSportKeys() {
       .map((sport) => String(sport.key || '').trim())
       .filter(Boolean);
 
-    const maxSports = Math.max(1, Number(env.SPORTS_AUTO_MAX_SPORTS_PER_SYNC || 80));
+    const maxSports = Math.max(1, Number(env.SPORTS_AUTO_MAX_SPORTS_PER_SYNC || 12));
     cachedActiveSportKeys = sportKeys.slice(0, maxSports);
     lastActiveSportsSyncAt = Date.now();
     return cachedActiveSportKeys.length ? cachedActiveSportKeys : DEFAULT_SPORT_KEYS;

@@ -32,5 +32,6 @@ const sportsAutoMarketSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 sportsAutoMarketSchema.index({ provider: 1, providerEventId: 1, marketKey: 1 }, { unique: true });
+sportsAutoMarketSchema.index({ event: 1, status: 1, updatedAt: -1 });
 
 export default mongoose.models.SportsAutoMarket || mongoose.model('SportsAutoMarket', sportsAutoMarketSchema);

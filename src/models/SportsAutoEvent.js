@@ -29,5 +29,7 @@ const sportsAutoEventSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 sportsAutoEventSchema.index({ provider: 1, providerEventId: 1 }, { unique: true });
+sportsAutoEventSchema.index({ isActive: 1, completed: 1, status: 1, commenceTime: 1, updatedAt: -1 });
+sportsAutoEventSchema.index({ sportKey: 1, isActive: 1, commenceTime: 1 });
 
 export default mongoose.models.SportsAutoEvent || mongoose.model('SportsAutoEvent', sportsAutoEventSchema);

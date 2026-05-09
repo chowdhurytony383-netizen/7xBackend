@@ -11,6 +11,78 @@ import { AppError } from '../utils/appError.js';
 import { syncSportsAll, syncSportsOdds, syncSportsScores } from '../services/freeSportsProviderService.js';
 import { placeSportsBet, settleOpenSportsBets } from '../services/sportsBettingService.js';
 
+let backgroundSportsSyncPromise = null;
+let liveMatchesCache = { createdAt: 0, payload: null };
+let categoriesCache = { createdAt: 0, payload: null };
+let matchOfTheDayCache = { createdAt: 0, payload: null };
+let lastBackgroundSettlementAt = 0;
+
+function cacheTtlMs(name, fallbackSeconds) {
+  const value = Number(process.env[name] || fallbackSeconds);
+  return Math.max(1, Number.isFinite(value) ? value : fallbackSeconds) * 1000;
+}
+
+function sportsProviderName() {
+  return String(process.env.SPORTS_ODDS_PROVIDER || 'theoddsapi').toLowerCase();
+}
+
+function sportsApiKeyConfigured() {
+  return Boolean(
+    process.env.SPORTS_ODDS_API_KEY
+    || process.env.THE_ODDS_API_KEY
+    || process.env.SPORTSGAMEODDS_API_KEY
+    || process.env.SPORTS_GAME_ODDS_API_KEY
+  );
+}
+
+function shouldSyncOnRequest() {
+  const value = process.env.SPORTS_AUTO_SYNC_ON_REQUEST;
+  if (value === undefined || value === null || value === '') return true;
+  return String(value).toLowerCase() === 'true';
+}
+
+function invalidateSportsResponseCaches() {
+  liveMatchesCache = { createdAt: 0, payload: null };
+  categoriesCache = { createdAt: 0, payload: null };
+  matchOfTheDayCache = { createdAt: 0, payload: null };
+}
+
+function triggerBackgroundSportsSync(reason = 'request') {
+  if (!shouldSyncOnRequest()) return null;
+  if (backgroundSportsSyncPromise) return backgroundSportsSyncPromise;
+
+  const settlementTtl = cacheTtlMs('SPORTS_SETTLEMENT_SYNC_TTL_SECONDS', 120);
+  const tasks = [syncSportsAll({ force: false })];
+
+  if (Date.now() - lastBackgroundSettlementAt > settlementTtl) {
+    lastBackgroundSettlementAt = Date.now();
+    tasks.push(settleOpenSportsBets({ force: false }));
+  }
+
+  backgroundSportsSyncPromise = Promise.allSettled(tasks)
+    .then((results) => {
+      results.forEach((result) => {
+        if (result.status === 'rejected') {
+          console.warn(`[sports] background sync failed (${reason}):`, result.reason?.message || result.reason);
+        }
+      });
+      return results;
+    })
+    .catch((error) => {
+      console.warn(`[sports] background sync failed (${reason}):`, error?.message || error);
+      return null;
+    })
+    .finally(() => {
+      backgroundSportsSyncPromise = null;
+    });
+
+  return backgroundSportsSyncPromise;
+}
+
+function cacheFresh(cache, ttlMs) {
+  return cache?.payload && Date.now() - cache.createdAt < ttlMs;
+}
+
 const CATEGORY_META = {
   football: { key: 'football', slug: 'football', name: 'Football', displayName: 'Football', icon: '⚽', colorClass: 'sport-football', gradient: 'linear-gradient(135deg,#22c55e,#16a34a)' },
   cricket: { key: 'cricket', slug: 'cricket', name: 'Cricket', displayName: 'Cricket', icon: '🏏', colorClass: 'sport-cricket', gradient: 'linear-gradient(135deg,#f59e0b,#ef4444)' },
@@ -184,8 +256,7 @@ function marketToOdds(market, event = {}) {
   return withSyntheticDraw(mapped, event, market.marketKey).slice(0, 9);
 }
 
-async function formatAutoEvent(event) {
-  const market = await SportsAutoMarket.findOne({ event: event._id, status: 'OPEN' }).sort({ updatedAt: -1 });
+function formatAutoEventFromMarket(event, market = null) {
   const odds = marketToOdds(market, event);
   const homeScore = scoreValue(event, event.homeTeam);
   const awayScore = scoreValue(event, event.awayTeam);
@@ -225,11 +296,30 @@ async function formatAutoEvent(event) {
   };
 }
 
-async function maybeAutoSync() {
-  if (!process.env.SPORTS_AUTO_SYNC_ON_REQUEST || String(process.env.SPORTS_AUTO_SYNC_ON_REQUEST).toLowerCase() === 'true') {
-    await syncSportsAll({ force: false });
-    await settleOpenSportsBets({ force: false });
-  }
+async function formatAutoEvent(event) {
+  const market = await SportsAutoMarket.findOne({ event: event._id, status: 'OPEN' }).sort({ updatedAt: -1 }).lean();
+  return formatAutoEventFromMarket(event, market);
+}
+
+async function formatAutoEvents(events = []) {
+  if (!events.length) return [];
+
+  const eventIds = events.map((event) => event._id);
+  const markets = await SportsAutoMarket.find({ event: { $in: eventIds }, status: 'OPEN' })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  const latestMarketByEvent = new Map();
+  markets.forEach((market) => {
+    const key = String(market.event);
+    if (!latestMarketByEvent.has(key)) latestMarketByEvent.set(key, market);
+  });
+
+  return events.map((event) => formatAutoEventFromMarket(event, latestMarketByEvent.get(String(event._id))));
+}
+
+function maybeAutoSync() {
+  triggerBackgroundSportsSync();
 }
 
 function mergeCategoryWithMeta(category) {
@@ -252,7 +342,7 @@ function mergeCategoryWithMeta(category) {
 }
 
 async function categoriesFromEvents() {
-  const events = await SportsAutoEvent.find(visibleEventFilter()).select('sportKey sportTitle').limit(500);
+  const events = await SportsAutoEvent.find(visibleEventFilter()).select('sportKey sportTitle').limit(500).lean();
   const map = new Map();
   events.forEach((event) => {
     const meta = categoryForEvent(event);
@@ -262,12 +352,17 @@ async function categoriesFromEvents() {
 }
 
 export const categories = asyncHandler(async (_req, res) => {
-  await maybeAutoSync();
+  maybeAutoSync();
 
-  const items = await SportsCategory.find({ isActive: true }).sort({ sortOrder: 1, name: 1 });
+  const ttl = cacheTtlMs('SPORTS_CATEGORIES_CACHE_SECONDS', 30);
+  if (cacheFresh(categoriesCache, ttl)) return res.json(categoriesCache.payload);
+
+  const items = await SportsCategory.find({ isActive: true }).sort({ sortOrder: 1, name: 1 }).lean();
   if (items.length) {
     const merged = items.map(mergeCategoryWithMeta);
-    return res.json({ success: true, data: merged, categories: merged, sports: merged });
+    const payload = { success: true, data: merged, categories: merged, sports: merged, cached: false };
+    categoriesCache = { createdAt: Date.now(), payload };
+    return res.json(payload);
   }
 
   const dynamic = await categoriesFromEvents();
@@ -278,45 +373,62 @@ export const categories = asyncHandler(async (_req, res) => {
     CATEGORY_META.tennis,
   ];
 
-  res.json({ success: true, data: fallback, categories: fallback, sports: fallback });
+  const payload = { success: true, data: fallback, categories: fallback, sports: fallback, cached: false };
+  categoriesCache = { createdAt: Date.now(), payload };
+  res.json(payload);
 });
 
 export const liveMatches = asyncHandler(async (_req, res) => {
-  await maybeAutoSync();
+  maybeAutoSync();
+
+  const ttl = cacheTtlMs('SPORTS_RESPONSE_CACHE_SECONDS', 6);
+  if (cacheFresh(liveMatchesCache, ttl)) return res.json({ ...liveMatchesCache.payload, cached: true });
 
   const autoEvents = await SportsAutoEvent.find(visibleEventFilter())
     .sort({ status: 1, commenceTime: 1, updatedAt: -1 })
-    .limit(150);
+    .limit(Number(process.env.SPORTS_RESPONSE_MATCH_LIMIT || 80))
+    .lean();
 
   if (autoEvents.length) {
-    const matches = await Promise.all(autoEvents.map(formatAutoEvent));
-    return res.json({ success: true, data: matches, matches, liveMatches: matches, events: matches });
+    const matches = await formatAutoEvents(autoEvents);
+    const payload = { success: true, data: matches, matches, liveMatches: matches, events: matches, cached: false };
+    liveMatchesCache = { createdAt: Date.now(), payload };
+    return res.json(payload);
   }
 
-  const matches = await SportsMatch.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).limit(50);
-  res.json({ success: true, data: matches, matches, liveMatches: matches, events: matches });
+  const matches = await SportsMatch.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).limit(50).lean();
+  const payload = { success: true, data: matches, matches, liveMatches: matches, events: matches, cached: false };
+  liveMatchesCache = { createdAt: Date.now(), payload };
+  res.json(payload);
 });
 
 export const matchOfTheDay = asyncHandler(async (_req, res) => {
-  await maybeAutoSync();
+  maybeAutoSync();
 
-  const event = await SportsAutoEvent.findOne(visibleEventFilter()).sort({ status: 1, commenceTime: 1 });
+  const ttl = cacheTtlMs('SPORTS_RESPONSE_CACHE_SECONDS', 6);
+  if (cacheFresh(matchOfTheDayCache, ttl)) return res.json({ ...matchOfTheDayCache.payload, cached: true });
+
+  const event = await SportsAutoEvent.findOne(visibleEventFilter()).sort({ status: 1, commenceTime: 1 }).lean();
   if (event) {
     const match = await formatAutoEvent(event);
-    return res.json({ success: true, data: match, match, matchOfTheDay: match, event: match });
+    const payload = { success: true, data: match, match, matchOfTheDay: match, event: match, cached: false };
+    matchOfTheDayCache = { createdAt: Date.now(), payload };
+    return res.json(payload);
   }
 
-  const match = await SportsMatch.findOne({ isActive: true, isMatchOfTheDay: true }).sort({ sortOrder: 1, createdAt: -1 })
-    || await SportsMatch.findOne({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 });
-  res.json({ success: true, data: match, match, matchOfTheDay: match, event: match });
+  const match = await SportsMatch.findOne({ isActive: true, isMatchOfTheDay: true }).sort({ sortOrder: 1, createdAt: -1 }).lean()
+    || await SportsMatch.findOne({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).lean();
+  const payload = { success: true, data: match, match, matchOfTheDay: match, event: match, cached: false };
+  matchOfTheDayCache = { createdAt: Date.now(), payload };
+  res.json(payload);
 });
 
 export const eventDetails = asyncHandler(async (req, res) => {
-  await maybeAutoSync();
-  const event = await SportsAutoEvent.findById(req.params.eventId);
+  maybeAutoSync();
+  const event = await SportsAutoEvent.findById(req.params.eventId).lean();
   if (!event) throw new AppError('Sports event not found', 404);
-  const market = await SportsAutoMarket.findOne({ event: event._id }).sort({ updatedAt: -1 });
-  const formattedEvent = await formatAutoEvent(event);
+  const market = await SportsAutoMarket.findOne({ event: event._id }).sort({ updatedAt: -1 }).lean();
+  const formattedEvent = formatAutoEventFromMarket(event, market);
   res.json({ success: true, data: { event: formattedEvent, market }, event: formattedEvent, market });
 });
 
@@ -358,27 +470,28 @@ export const placeMultipleBets = asyncHandler(async (req, res) => {
 });
 
 export const myBets = asyncHandler(async (req, res) => {
-  await maybeAutoSync();
-  const bets = await SportsAutoBet.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(150);
+  const bets = await SportsAutoBet.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(150).lean();
   res.json({ success: true, data: bets, bets });
 });
 
 export const syncNow = asyncHandler(async (_req, res) => {
   const result = await syncSportsAll({ force: true });
+  invalidateSportsResponseCaches();
   res.json({ success: true, message: 'Sports sync requested', data: result, result });
 });
 
 export const settleNow = asyncHandler(async (_req, res) => {
   await syncSportsScores({ force: true });
   const result = await settleOpenSportsBets({ force: true });
+  invalidateSportsResponseCaches();
   res.json({ success: true, message: 'Sports settlement requested', data: result, result });
 });
 
 export const syncStatus = asyncHandler(async (_req, res) => {
   const [lastOdds, lastScores, lastSettlement, events, openBets] = await Promise.all([
-    SportsSyncLog.findOne({ type: 'odds' }).sort({ createdAt: -1 }),
-    SportsSyncLog.findOne({ type: 'scores' }).sort({ createdAt: -1 }),
-    SportsSyncLog.findOne({ type: 'settlement' }).sort({ createdAt: -1 }),
+    SportsSyncLog.findOne({ type: 'odds' }).sort({ createdAt: -1 }).lean(),
+    SportsSyncLog.findOne({ type: 'scores' }).sort({ createdAt: -1 }).lean(),
+    SportsSyncLog.findOne({ type: 'settlement' }).sort({ createdAt: -1 }).lean(),
     SportsAutoEvent.countDocuments(visibleEventFilter()),
     SportsAutoBet.countDocuments({ status: 'OPEN' }),
   ]);
@@ -386,8 +499,8 @@ export const syncStatus = asyncHandler(async (_req, res) => {
   res.json({
     success: true,
     data: {
-      provider: 'theoddsapi',
-      enabled: Boolean(process.env.SPORTS_ODDS_API_KEY),
+      provider: sportsProviderName(),
+      enabled: sportsApiKeyConfigured(),
       autoSettlement: Boolean(process.env.SPORTS_AUTO_SETTLEMENT_ENABLED === 'true'),
       events,
       openBets,

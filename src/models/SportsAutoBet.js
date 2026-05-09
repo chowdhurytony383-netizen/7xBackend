@@ -33,4 +33,7 @@ const sportsAutoBetSchema = new mongoose.Schema({
   settledBy: { type: String, default: 'auto' },
 }, { timestamps: true });
 
+sportsAutoBetSchema.index({ user: 1, createdAt: -1 });
+sportsAutoBetSchema.index({ status: 1, createdAt: 1 });
+
 export default mongoose.models.SportsAutoBet || mongoose.model('SportsAutoBet', sportsAutoBetSchema);
