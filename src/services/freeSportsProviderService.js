@@ -6,10 +6,24 @@ import SportsAutoMarket from '../models/SportsAutoMarket.js';
 import SportsSyncLog from '../models/SportsSyncLog.js';
 
 const THE_ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
+const DEFAULT_SPORT_KEYS = [
+  'soccer_epl',
+  'soccer_uefa_champs_league',
+  'cricket_test_match',
+  'cricket_odi',
+  'cricket_t20',
+  'basketball_nba',
+  'tennis_atp_singles',
+  'tennis_wta_singles',
+];
+
 let lastOddsSyncAt = 0;
 let lastScoreSyncAt = 0;
+let lastActiveSportsSyncAt = 0;
+let cachedActiveSportKeys = [];
 let oddsSyncPromise = null;
 let scoreSyncPromise = null;
+let activeSportsPromise = null;
 
 function csv(value, fallback = []) {
   const source = String(value || '').trim();
@@ -17,11 +31,16 @@ function csv(value, fallback = []) {
   return source.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+function bool(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  return String(value).toLowerCase() === 'true';
+}
+
 function stableId(...parts) {
   return crypto.createHash('sha1').update(parts.filter(Boolean).join('|')).digest('hex').slice(0, 24);
 }
 
-async function fetchJson(url, timeoutMs = 20000) {
+async function fetchJson(url, timeoutMs = 25000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -60,8 +79,6 @@ function nowStatus(commenceTime) {
   if (ts > now + 15 * 60 * 1000) return 'UPCOMING';
   return 'LIVE';
 }
-
-
 
 function oldEventCutoff() {
   const hours = Math.max(1, Number(env.SPORTS_HIDE_STARTED_OLDER_HOURS || 24));
@@ -122,6 +139,45 @@ function pickBookmaker(bookmakers = []) {
   return bookmakers[0];
 }
 
+function isAllSportsMode() {
+  const value = String(env.SPORTS_AUTO_SPORT_KEYS || '').trim().toLowerCase();
+  return value === 'all' || value === 'active' || bool(env.SPORTS_AUTO_SYNC_ACTIVE_SPORTS, false);
+}
+
+async function fetchActiveSportKeys() {
+  if (!env.SPORTS_ODDS_API_KEY) return DEFAULT_SPORT_KEYS;
+
+  const ttl = Math.max(300, Number(env.SPORTS_ACTIVE_SPORTS_TTL_SECONDS || 1800)) * 1000;
+  if (cachedActiveSportKeys.length && Date.now() - lastActiveSportsSyncAt < ttl) return cachedActiveSportKeys;
+  if (activeSportsPromise) return activeSportsPromise;
+
+  activeSportsPromise = (async () => {
+    const url = `${THE_ODDS_API_BASE}/sports?apiKey=${encodeURIComponent(env.SPORTS_ODDS_API_KEY)}`;
+    const data = await fetchJson(url);
+    if (!Array.isArray(data)) return DEFAULT_SPORT_KEYS;
+
+    const sportKeys = data
+      .filter((sport) => sport && sport.active !== false)
+      .filter((sport) => !sport.has_outrights)
+      .map((sport) => String(sport.key || '').trim())
+      .filter(Boolean);
+
+    const maxSports = Math.max(1, Number(env.SPORTS_AUTO_MAX_SPORTS_PER_SYNC || 80));
+    cachedActiveSportKeys = sportKeys.slice(0, maxSports);
+    lastActiveSportsSyncAt = Date.now();
+    return cachedActiveSportKeys.length ? cachedActiveSportKeys : DEFAULT_SPORT_KEYS;
+  })().finally(() => {
+    activeSportsPromise = null;
+  });
+
+  return activeSportsPromise;
+}
+
+async function getConfiguredSportKeys() {
+  if (isAllSportsMode()) return fetchActiveSportKeys();
+  return csv(env.SPORTS_AUTO_SPORT_KEYS || '', DEFAULT_SPORT_KEYS);
+}
+
 async function upsertOddsEvent(providerEvent, sportKey) {
   const providerEventId = String(providerEvent.id || stableId(sportKey, providerEvent.home_team, providerEvent.away_team, providerEvent.commence_time));
   const homeTeam = providerEvent.home_team || providerEvent.homeTeam || 'Home Team';
@@ -145,7 +201,7 @@ async function upsertOddsEvent(providerEvent, sportKey) {
         completed: Boolean(providerEvent.completed),
         lastProviderUpdate: new Date(),
         raw: providerEvent,
-        isActive: true,
+        isActive: !providerEvent.completed,
       },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -203,21 +259,18 @@ async function syncTheOddsApiOdds() {
   }
 
   const startedAt = new Date();
-  const sportKeys = csv(env.SPORTS_AUTO_SPORT_KEYS || '', [
-    'soccer_epl',
-    'soccer_uefa_champs_league',
-    'cricket_test_match',
-    'cricket_odi',
-    'cricket_t20',
-    'basketball_nba',
-    'tennis_atp_singles',
-    'tennis_wta_singles',
-  ]);
-  const regions = encodeURIComponent(env.SPORTS_DEFAULT_REGIONS || 'us,uk,eu');
+  const sportKeys = await getConfiguredSportKeys();
+  const regions = encodeURIComponent(env.SPORTS_DEFAULT_REGIONS || 'us,uk,eu,au');
   const markets = encodeURIComponent(env.SPORTS_DEFAULT_MARKETS || 'h2h');
   const oddsFormat = encodeURIComponent(env.SPORTS_ODDS_FORMAT || 'decimal');
 
-  const stats = { sports: sportKeys.length, events: 0, markets: 0, skippedSports: [] };
+  const stats = {
+    mode: isAllSportsMode() ? 'all_active_sports' : 'configured_sports',
+    sports: sportKeys.length,
+    events: 0,
+    markets: 0,
+    skippedSports: [],
+  };
 
   for (const sportKey of sportKeys) {
     const url = `${THE_ODDS_API_BASE}/sports/${encodeURIComponent(sportKey)}/odds?apiKey=${encodeURIComponent(env.SPORTS_ODDS_API_KEY)}&regions=${regions}&markets=${markets}&oddsFormat=${oddsFormat}`;
@@ -256,18 +309,15 @@ async function syncTheOddsApiScores() {
   }
 
   const startedAt = new Date();
-  const sportKeys = csv(env.SPORTS_AUTO_SPORT_KEYS || '', [
-    'soccer_epl',
-    'soccer_uefa_champs_league',
-    'cricket_test_match',
-    'cricket_odi',
-    'cricket_t20',
-    'basketball_nba',
-    'tennis_atp_singles',
-    'tennis_wta_singles',
-  ]);
+  const sportKeys = await getConfiguredSportKeys();
 
-  const stats = { sports: sportKeys.length, events: 0, finished: 0, skippedSports: [] };
+  const stats = {
+    mode: isAllSportsMode() ? 'all_active_sports' : 'configured_sports',
+    sports: sportKeys.length,
+    events: 0,
+    finished: 0,
+    skippedSports: [],
+  };
 
   for (const sportKey of sportKeys) {
     const url = `${THE_ODDS_API_BASE}/sports/${encodeURIComponent(sportKey)}/scores?apiKey=${encodeURIComponent(env.SPORTS_ODDS_API_KEY)}&daysFrom=3`;
@@ -291,6 +341,7 @@ async function syncTheOddsApiScores() {
               status: completed ? 'FINISHED' : nowStatus(item.commence_time),
               lastScoreUpdate: new Date(),
               lastProviderUpdate: new Date(),
+              isActive: !completed,
             },
           },
           { new: true }
@@ -320,7 +371,7 @@ async function syncTheOddsApiScores() {
 }
 
 export async function syncSportsOdds({ force = false } = {}) {
-  const ttl = Math.max(15, Number(env.SPORTS_ODDS_SYNC_TTL_SECONDS || 60)) * 1000;
+  const ttl = Math.max(5, Number(env.SPORTS_ODDS_SYNC_TTL_SECONDS || 30)) * 1000;
   if (!force && Date.now() - lastOddsSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (oddsSyncPromise) return oddsSyncPromise;
 
@@ -334,7 +385,7 @@ export async function syncSportsOdds({ force = false } = {}) {
 }
 
 export async function syncSportsScores({ force = false } = {}) {
-  const ttl = Math.max(15, Number(env.SPORTS_SCORE_SYNC_TTL_SECONDS || 90)) * 1000;
+  const ttl = Math.max(5, Number(env.SPORTS_SCORE_SYNC_TTL_SECONDS || 30)) * 1000;
   if (!force && Date.now() - lastScoreSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (scoreSyncPromise) return scoreSyncPromise;
 
@@ -357,8 +408,4 @@ export async function syncSportsAll(options = {}) {
     odds: odds.status === 'fulfilled' ? odds.value : { failed: true, message: odds.reason?.message },
     scores: scores.status === 'fulfilled' ? scores.value : { failed: true, message: scores.reason?.message },
   };
-}
-
-export async function clearStaleSportsEvents() {
-  return deactivateStaleSportsEvents();
 }
