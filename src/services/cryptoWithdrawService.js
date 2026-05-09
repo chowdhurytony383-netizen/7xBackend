@@ -103,7 +103,7 @@ export async function getCryptoWithdrawOptions() {
   const keys = new Set(allowedWithdrawKeys());
   const methods = await CryptoMethod.find({ enabled: true }).sort({ sortOrder: 1, displayName: 1 });
   return methods
-    .filter((method) => keys.has(normalizeKey(method.key)))
+    .filter((method) => !keys.size || keys.has(normalizeKey(method.key)))
     .filter((method) => method.withdrawEnabled !== false)
     .map((method) => ({
       key: method.key,

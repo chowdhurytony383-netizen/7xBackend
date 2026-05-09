@@ -9,6 +9,18 @@ import { AppError } from '../utils/appError.js';
 import { syncSportsAll, syncSportsOdds, syncSportsScores } from '../services/freeSportsProviderService.js';
 import { placeSportsBet, settleOpenSportsBets } from '../services/sportsBettingService.js';
 
+const CATEGORY_META = {
+  football: { key: 'football', slug: 'football', name: 'Football', displayName: 'Football', icon: '⚽', colorClass: 'sport-football', gradient: 'linear-gradient(135deg,#22c55e,#16a34a)' },
+  cricket: { key: 'cricket', slug: 'cricket', name: 'Cricket', displayName: 'Cricket', icon: '🏏', colorClass: 'sport-cricket', gradient: 'linear-gradient(135deg,#f59e0b,#ef4444)' },
+  basketball: { key: 'basketball', slug: 'basketball', name: 'Basketball', displayName: 'Basketball', icon: '🏀', colorClass: 'sport-basketball', gradient: 'linear-gradient(135deg,#fb923c,#ea580c)' },
+  tennis: { key: 'tennis', slug: 'tennis', name: 'Tennis', displayName: 'Tennis', icon: '🎾', colorClass: 'sport-tennis', gradient: 'linear-gradient(135deg,#a3e635,#65a30d)' },
+  hockey: { key: 'hockey', slug: 'hockey', name: 'Hockey', displayName: 'Hockey', icon: '🏒', colorClass: 'sport-hockey', gradient: 'linear-gradient(135deg,#38bdf8,#2563eb)' },
+  baseball: { key: 'baseball', slug: 'baseball', name: 'Baseball', displayName: 'Baseball', icon: '⚾', colorClass: 'sport-baseball', gradient: 'linear-gradient(135deg,#f43f5e,#be123c)' },
+  rugby: { key: 'rugby', slug: 'rugby', name: 'Rugby', displayName: 'Rugby', icon: '🏉', colorClass: 'sport-rugby', gradient: 'linear-gradient(135deg,#14b8a6,#0f766e)' },
+  volleyball: { key: 'volleyball', slug: 'volleyball', name: 'Volleyball', displayName: 'Volleyball', icon: '🏐', colorClass: 'sport-volleyball', gradient: 'linear-gradient(135deg,#c084fc,#7c3aed)' },
+  boxing: { key: 'boxing', slug: 'boxing', name: 'Boxing / MMA', displayName: 'Boxing / MMA', icon: '🥊', colorClass: 'sport-boxing', gradient: 'linear-gradient(135deg,#f97316,#dc2626)' },
+  sports: { key: 'sports', slug: 'sports', name: 'Sports', displayName: 'Sports', icon: '🏆', colorClass: 'sport-default', gradient: 'linear-gradient(135deg,#8b5cf6,#2563eb)' },
+};
 
 function visibleEventCutoff() {
   const hours = Math.max(1, Number(process.env.SPORTS_HIDE_STARTED_OLDER_HOURS || 24));
@@ -25,8 +37,56 @@ function visibleEventFilter(extra = {}) {
   };
 }
 
-function teamObject(name) {
-  return { name, displayName: name, logo: '', image: '', flag: '' };
+function categoryKeyForSport(sportKey = '', sportTitle = '') {
+  const clean = `${sportKey} ${sportTitle}`.toLowerCase();
+  if (clean.includes('soccer') || clean.includes('football') || clean.includes('uefa') || clean.includes('epl')) return 'football';
+  if (clean.includes('cricket')) return 'cricket';
+  if (clean.includes('basket')) return 'basketball';
+  if (clean.includes('tennis')) return 'tennis';
+  if (clean.includes('hockey')) return 'hockey';
+  if (clean.includes('baseball')) return 'baseball';
+  if (clean.includes('rugby')) return 'rugby';
+  if (clean.includes('volleyball')) return 'volleyball';
+  if (clean.includes('mma') || clean.includes('boxing')) return 'boxing';
+  return 'sports';
+}
+
+function categoryForEvent(event = {}) {
+  const key = categoryKeyForSport(event.sportKey, event.sportTitle || event.sport);
+  return CATEGORY_META[key] || CATEGORY_META.sports;
+}
+
+function shortTeamCode(name = '') {
+  const words = String(name || 'Team')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!words.length) return 'TM';
+  if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
+  return words.slice(0, 2).map((word) => word.charAt(0)).join('').toUpperCase();
+}
+
+function colorIndexFor(value = '') {
+  const source = String(value || 'team');
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (hash * 31 + source.charCodeAt(index)) % 9973;
+  }
+  return (hash % 8) + 1;
+}
+
+function teamObject(name, sportKey = '') {
+  return {
+    name,
+    displayName: name,
+    shortName: shortTeamCode(name),
+    logo: '',
+    image: '',
+    flag: '',
+    logoText: shortTeamCode(name),
+    colorClass: `team-logo-${colorIndexFor(`${sportKey}:${name}`)}`,
+  };
 }
 
 function scoreValue(event, teamName) {
@@ -55,18 +115,25 @@ async function formatAutoEvent(event) {
   const homeScore = scoreValue(event, event.homeTeam);
   const awayScore = scoreValue(event, event.awayTeam);
   const status = event.completed ? 'Finished' : event.status === 'LIVE' ? 'Live' : 'Upcoming';
+  const category = categoryForEvent(event);
 
   return {
     _id: event._id,
     id: event._id,
     providerEventId: event.providerEventId,
-    sport: event.sportTitle || event.sportKey || 'Sports',
+    sport: event.sportTitle || event.sportKey || category.displayName || 'Sports',
+    sportTitle: event.sportTitle || event.sportKey || category.displayName || 'Sports',
     sportKey: event.sportKey,
+    category,
+    categoryKey: category.key,
+    categoryName: category.displayName,
+    categoryIcon: category.icon,
+    categoryColorClass: category.colorClass,
     country: '',
     league: event.league || event.sportTitle || '',
     tournament: event.league || event.sportTitle || '',
-    homeTeam: teamObject(event.homeTeam),
-    awayTeam: teamObject(event.awayTeam),
+    homeTeam: teamObject(event.homeTeam, event.sportKey),
+    awayTeam: teamObject(event.awayTeam, event.sportKey),
     score: { home: homeScore, away: awayScore },
     status,
     markets: odds,
@@ -90,15 +157,50 @@ async function maybeAutoSync() {
   }
 }
 
-export const categories = asyncHandler(async (_req, res) => {
-  const items = await SportsCategory.find({ isActive: true }).sort({ sortOrder: 1, name: 1 });
-  if (items.length) return res.json({ success: true, data: items, categories: items, sports: items });
+function mergeCategoryWithMeta(category) {
+  const plain = category?.toObject ? category.toObject() : category;
+  const key = plain?.slug || plain?.key || categoryKeyForSport(plain?.name, plain?.displayName);
+  const meta = CATEGORY_META[key] || CATEGORY_META[categoryKeyForSport(key, plain?.displayName)] || CATEGORY_META.sports;
+  return {
+    ...meta,
+    ...plain,
+    key: meta.key,
+    slug: plain?.slug || meta.slug,
+    icon: plain?.icon || plain?.logo || meta.icon,
+    logo: plain?.logo || plain?.image || '',
+    image: plain?.image || plain?.logo || '',
+    colorClass: plain?.colorClass || meta.colorClass,
+    gradient: plain?.gradient || meta.gradient,
+    displayName: plain?.displayName || plain?.name || meta.displayName,
+    name: plain?.name || plain?.displayName || meta.name,
+  };
+}
 
-  const fallback = [
-    { name: 'Football', displayName: 'Football', slug: 'football', icon: '⚽', isActive: true },
-    { name: 'Cricket', displayName: 'Cricket', slug: 'cricket', icon: '🏏', isActive: true },
-    { name: 'Basketball', displayName: 'Basketball', slug: 'basketball', icon: '🏀', isActive: true },
-    { name: 'Tennis', displayName: 'Tennis', slug: 'tennis', icon: '🎾', isActive: true },
+async function categoriesFromEvents() {
+  const events = await SportsAutoEvent.find(visibleEventFilter()).select('sportKey sportTitle').limit(500);
+  const map = new Map();
+  events.forEach((event) => {
+    const meta = categoryForEvent(event);
+    map.set(meta.key, meta);
+  });
+  return Array.from(map.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+export const categories = asyncHandler(async (_req, res) => {
+  await maybeAutoSync();
+
+  const items = await SportsCategory.find({ isActive: true }).sort({ sortOrder: 1, name: 1 });
+  if (items.length) {
+    const merged = items.map(mergeCategoryWithMeta);
+    return res.json({ success: true, data: merged, categories: merged, sports: merged });
+  }
+
+  const dynamic = await categoriesFromEvents();
+  const fallback = dynamic.length ? dynamic : [
+    CATEGORY_META.football,
+    CATEGORY_META.cricket,
+    CATEGORY_META.basketball,
+    CATEGORY_META.tennis,
   ];
 
   res.json({ success: true, data: fallback, categories: fallback, sports: fallback });
@@ -109,7 +211,7 @@ export const liveMatches = asyncHandler(async (_req, res) => {
 
   const autoEvents = await SportsAutoEvent.find(visibleEventFilter())
     .sort({ status: 1, commenceTime: 1, updatedAt: -1 })
-    .limit(100);
+    .limit(150);
 
   if (autoEvents.length) {
     const matches = await Promise.all(autoEvents.map(formatAutoEvent));
@@ -139,7 +241,8 @@ export const eventDetails = asyncHandler(async (req, res) => {
   const event = await SportsAutoEvent.findById(req.params.eventId);
   if (!event) throw new AppError('Sports event not found', 404);
   const market = await SportsAutoMarket.findOne({ event: event._id }).sort({ updatedAt: -1 });
-  res.json({ success: true, data: { event: await formatAutoEvent(event), market }, event: await formatAutoEvent(event), market });
+  const formattedEvent = await formatAutoEvent(event);
+  res.json({ success: true, data: { event: formattedEvent, market }, event: formattedEvent, market });
 });
 
 export const placeBet = asyncHandler(async (req, res) => {
@@ -154,8 +257,34 @@ export const placeBet = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, message: 'Sports bet placed successfully', data: bet, bet });
 });
 
+export const placeMultipleBets = asyncHandler(async (req, res) => {
+  const selections = Array.isArray(req.body.selections) ? req.body.selections : [];
+  if (!selections.length) throw new AppError('No bet selections submitted', 400);
+  if (selections.length > 20) throw new AppError('Maximum 20 selections can be placed at once', 400);
+
+  const placed = [];
+  for (const item of selections) {
+    const bet = await placeSportsBet({
+      user: req.user,
+      eventId: item.eventId,
+      marketKey: item.marketKey || 'h2h',
+      selectionId: item.selectionId,
+      stake: item.stake,
+    });
+    placed.push(bet);
+  }
+
+  res.status(201).json({
+    success: true,
+    message: `${placed.length} sports bet${placed.length === 1 ? '' : 's'} placed successfully`,
+    data: placed,
+    bets: placed,
+  });
+});
+
 export const myBets = asyncHandler(async (req, res) => {
-  const bets = await SportsAutoBet.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(100);
+  await maybeAutoSync();
+  const bets = await SportsAutoBet.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(150);
   res.json({ success: true, data: bets, bets });
 });
 

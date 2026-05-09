@@ -6,6 +6,7 @@ import {
   matchOfTheDay,
   myBets,
   placeBet,
+  placeMultipleBets,
   settleNow,
   syncNow,
   syncStatus,
@@ -21,6 +22,7 @@ router.get('/events/:eventId', eventDetails);
 router.get('/sync-status', syncStatus);
 
 router.post('/bets/place', protect, placeBet);
+router.post('/bets/place-multiple', protect, placeMultipleBets);
 router.get('/bets/my', protect, myBets);
 
 router.post('/auto/sync', protect, requireAdmin, syncNow);
