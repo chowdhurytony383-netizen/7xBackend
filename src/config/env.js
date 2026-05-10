@@ -82,9 +82,9 @@ export const env = {
 
 
   // Agent commission rules.
-  // 0.06 = 6 commission per 100 successful agent deposit.
+  // Percentage in the agent's own currency. Example: BDT 100 -> BDT 6, USD 1 -> USD 0.06.
   AGENT_DEPOSIT_COMMISSION_RATE: Number(process.env.AGENT_DEPOSIT_COMMISSION_RATE || 0.06),
-  // 0.02 = 2 commission per 100 successful agent withdrawal.
+  // Percentage in the agent's own currency. Example: BDT 100 -> BDT 2, USD 1 -> USD 0.02.
   AGENT_WITHDRAW_COMMISSION_RATE: Number(process.env.AGENT_WITHDRAW_COMMISSION_RATE || 0.02),
   // On/after this day of every month commissionBalance moves to agent balance.
   AGENT_COMMISSION_PAYOUT_DAY: Number(process.env.AGENT_COMMISSION_PAYOUT_DAY || 3),
