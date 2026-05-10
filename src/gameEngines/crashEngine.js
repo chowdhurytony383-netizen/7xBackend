@@ -4,6 +4,7 @@ import CrashBet from '../models/CrashBet.js';
 import User from '../models/User.js';
 import { AppError, assertOrThrow } from '../utils/appError.js';
 import { creditWallet, debitWallet } from '../utils/wallet.js';
+import { recordWagerTurnover } from '../services/withdrawalGuardService.js';
 import {
   CRASH_PAUSE_MS,
   WAIT_DURATION_MS,
@@ -299,6 +300,10 @@ class CrashEngine {
     } finally {
       await session.endSession();
     }
+
+    await recordWagerTurnover(userId, amount, 'crash-bet').catch((error) => {
+      console.error('Crash turnover tracking failed:', error.message);
+    });
 
     this.activeBetCache.set(String(bet._id), bet);
     this.emitState(true);
