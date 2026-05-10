@@ -67,12 +67,12 @@ const DEMO_SPIN_WEIGHTS = [
 
 // Higher payout cards appear less often.
 const WIN_SYMBOL_WEIGHTS = [
-  { symbol: 'Symbol_1', weight: 3000 },
-  { symbol: 'Symbol_2', weight: 2400 },
-  { symbol: 'Symbol_3', weight: 1900 },
-  { symbol: 'Symbol_4', weight: 1400 },
-  { symbol: 'Symbol_5', weight: 900 },
-  { symbol: 'Symbol_6', weight: 400 },
+  { symbol: 'Symbol_1', weight: 2000 },
+  { symbol: 'Symbol_2', weight: 1400 },
+  { symbol: 'Symbol_3', weight: 900 },
+  { symbol: 'Symbol_4', weight: 400 },
+  { symbol: 'Symbol_5', weight: 400 },
+  { symbol: 'Symbol_6', weight: 200 },
 ];
 
 function decodeGameToken(token) {
