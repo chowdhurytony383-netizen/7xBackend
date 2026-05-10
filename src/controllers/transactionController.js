@@ -182,11 +182,74 @@ function pickRandomItem(items) {
   return items[crypto.randomInt(items.length)];
 }
 
+function normalizeCountryCode(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function normalizeCountryName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getCountryScope(account = {}) {
+  return {
+    countryCode: normalizeCountryCode(account.countryCode),
+    country: normalizeCountryName(account.country),
+    currency: normalizeCountryCode(account.currency),
+  };
+}
+
+function hasCountryScope(scope = {}) {
+  return Boolean(scope.countryCode || scope.country || scope.currency);
+}
+
+function isAgentInUserCountry(agent, user) {
+  const userScope = getCountryScope(user);
+  const agentScope = getCountryScope(agent);
+
+  // Strict rule: local/manual agent payment methods are shown only to users who have a registered country.
+  // Crypto options are loaded through separate crypto endpoints and remain available for all countries.
+  if (!hasCountryScope(userScope)) return false;
+
+  if (userScope.countryCode && agentScope.countryCode) {
+    return userScope.countryCode === agentScope.countryCode;
+  }
+
+  if (userScope.country && agentScope.country) {
+    return userScope.country === agentScope.country;
+  }
+
+  // Last fallback for older records where only currency was saved.
+  if (userScope.currency && agentScope.currency) {
+    return userScope.currency === agentScope.currency;
+  }
+
+  return false;
+}
+
+async function getActiveAgentsForUserCountry(user) {
+  const userScope = getCountryScope(user);
+  if (!hasCountryScope(userScope)) return [];
+
+  const activeAgents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(1000);
+  return activeAgents.filter((agent) => isAgentInUserCountry(agent, user));
+}
+
+function buildCountryPayload(user) {
+  const scope = getCountryScope(user);
+  return {
+    countryScoped: true,
+    userCountryCode: scope.countryCode || '',
+    userCountry: user?.country || '',
+    userCurrency: scope.currency || '',
+  };
+}
+
 export const getAgentDepositOptions = asyncHandler(async (req, res) => {
   assertUserCanDeposit(req.user);
   const globalMethods = await getGlobalDepositMethods(true);
   const methodGroups = groupDepositMethodsByTitle(globalMethods);
-  const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(500);
+  const agents = await getActiveAgentsForUserCountry(req.user);
+  const countryPayload = buildCountryPayload(req.user);
 
   const options = [];
 
@@ -237,10 +300,13 @@ export const getAgentDepositOptions = asyncHandler(async (req, res) => {
       duplicateMethodCount: group.methods.length,
       duplicateKeys: group.duplicateKeys || [],
       selectionMode: 'random-agent',
+      countryScoped: true,
+      agentCountryCode: selectedAgent.countryCode || '',
+      agentCountry: selectedAgent.country || '',
     });
   }
 
-  res.json({ success: true, data: options, options });
+  res.json({ success: true, ...countryPayload, data: options, options });
 });
 
 
@@ -248,7 +314,8 @@ export const getAgentWithdrawOptions = asyncHandler(async (req, res) => {
   assertUserCanWithdraw(req.user);
   const globalMethods = await getGlobalDepositMethods(true);
   const methodGroups = groupDepositMethodsByTitle(globalMethods);
-  const agents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(500);
+  const agents = await getActiveAgentsForUserCountry(req.user);
+  const countryPayload = buildCountryPayload(req.user);
 
   const options = [];
 
@@ -297,10 +364,13 @@ export const getAgentWithdrawOptions = asyncHandler(async (req, res) => {
       duplicateMethodCount: group.methods.length,
       duplicateKeys: group.duplicateKeys || [],
       selectionMode: 'random-agent-withdraw',
+      countryScoped: true,
+      agentCountryCode: selectedAgent.countryCode || '',
+      agentCountry: selectedAgent.country || '',
     });
   }
 
-  res.json({ success: true, data: options, options });
+  res.json({ success: true, ...countryPayload, data: options, options });
 });
 
 export const createAgentDepositRequest = asyncHandler(async (req, res) => {
@@ -320,6 +390,11 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
 
   const agent = await Agent.findOne({ agentId, status: 'active' });
   assertOrThrow(agent, 'Agent not found or inactive', 404);
+  assertOrThrow(
+    isAgentInUserCountry(agent, req.user),
+    'This agent payment method is not available for your registered country',
+    403
+  );
   assertOrThrow(
     isPaymentMethodAssignedToAgent(agent, methodKey, globalMethods),
     'This payment method is not assigned to the selected agent',
@@ -410,11 +485,16 @@ export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
   if (agentId) {
     agent = await Agent.findOne({ agentId, status: 'active' });
   } else {
-    const activeAgents = await Agent.find({ status: 'active' }).sort({ createdAt: 1 }).limit(500);
+    const activeAgents = await getActiveAgentsForUserCountry(req.user);
     const eligibleAgents = activeAgents.filter((item) => isPaymentMethodAssignedToAgent(item, methodKey, globalMethods));
     agent = pickRandomItem(eligibleAgents);
   }
-  assertOrThrow(agent, 'No active agent available for withdrawal', 404);
+  assertOrThrow(agent, 'No active agent available for your registered country', 404);
+  assertOrThrow(
+    isAgentInUserCountry(agent, req.user),
+    'This agent withdrawal method is not available for your registered country',
+    403
+  );
   assertOrThrow(
     isPaymentMethodAssignedToAgent(agent, methodKey, globalMethods),
     'This withdrawal method is not assigned to the selected agent',
