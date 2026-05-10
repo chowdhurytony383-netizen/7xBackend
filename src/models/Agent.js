@@ -35,6 +35,24 @@ const agentSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  // Commission is earned from successful agent-handled deposits/withdrawals.
+  // It stays here until the configured monthly payout day, then moves to balance.
+  commissionBalance: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  commissionTotalEarned: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  commissionLastPayoutMonth: {
+    type: String,
+    default: '',
+    index: true,
+  },
+  commissionLastPayoutAt: Date,
   countryCode: {
     type: String,
     trim: true,

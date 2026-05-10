@@ -16,7 +16,15 @@ const agentTransactionSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['TOP_UP', 'ADJUSTMENT', 'DEPOSIT_CONFIRM', 'WITHDRAW_CONFIRM', 'REQUEST_REJECT', 'USER_BALANCE_TRANSFER'],
+    enum: [
+      'TOP_UP',
+      'ADJUSTMENT',
+      'DEPOSIT_CONFIRM',
+      'WITHDRAW_CONFIRM',
+      'REQUEST_REJECT',
+      'USER_BALANCE_TRANSFER',
+      'COMMISSION_PAYOUT',
+    ],
     default: 'TOP_UP',
   },
   amount: {
