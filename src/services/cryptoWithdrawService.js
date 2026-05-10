@@ -8,6 +8,7 @@ import { getCryptoFiatRate } from './cryptoPriceService.js';
 import { syncDefaultCryptoMethods } from './cryptoAddressService.js';
 import { getDefaultCryptoMethod } from './cryptoConfig.js';
 import { tatumRequest } from './tatumService.js';
+import { assertWithdrawalAllowedForUser } from './withdrawalGuardService.js';
 
 function nowDate() {
   return new Date();
@@ -103,7 +104,7 @@ export async function getCryptoWithdrawOptions() {
   const keys = new Set(allowedWithdrawKeys());
   const methods = await CryptoMethod.find({ enabled: true }).sort({ sortOrder: 1, displayName: 1 });
   return methods
-    .filter((method) => !keys.size || keys.has(normalizeKey(method.key)))
+    .filter((method) => keys.has(normalizeKey(method.key)))
     .filter((method) => method.withdrawEnabled !== false)
     .map((method) => ({
       key: method.key,
@@ -292,6 +293,7 @@ export async function createCryptoWithdrawalRequest({ user, amountFiat, methodKe
 
   assertOrThrow(amount >= minAmount, `Minimum withdraw amount is ${minAmount}`, 400);
   assertOrThrow(amount <= maxAmount, `Maximum withdraw amount is ${maxAmount}`, 400);
+  await assertWithdrawalAllowedForUser(user, amount);
   assertOrThrow((user.wallet || 0) >= amount, 'Insufficient wallet balance', 400);
 
   const cleanAddress = validateCryptoAddress(method, toAddress);
