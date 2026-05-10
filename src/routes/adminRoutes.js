@@ -9,6 +9,8 @@ import {
   updateUser,
   updateUserStatus,
   updateUserVerification,
+  updateUserPermissions,
+  transferUserBalanceToAgent,
   updateWithdrawalStatus,
   userDetails,
   users,
@@ -25,6 +27,11 @@ router.get('/users/:userId', userDetails);
 router.patch('/users/:userId', updateUser);
 router.patch('/users/:userId/status', updateUserStatus);
 router.patch('/users/:userId/verification', updateUserVerification);
+router.patch('/users/:userId/permissions', updateUserPermissions);
+router.post('/users/:userId/transfer-to-agent', transferUserBalanceToAgent);
+// Backward-compatible aliases for older frontend builds or copied URLs.
+router.patch('/users/:userId/access', updateUserPermissions);
+router.post('/users/:userId/transfer-balance-to-agent', transferUserBalanceToAgent);
 router.get('/deposits', deposits);
 router.patch('/deposits/:transactionId/status', updateDepositStatus);
 router.get('/withdrawals', withdrawals);
