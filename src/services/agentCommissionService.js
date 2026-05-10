@@ -5,6 +5,27 @@ import { env } from '../config/env.js';
 
 const roundMoney = (value) => Number((Number(value || 0)).toFixed(2));
 
+function getAgentCurrencyContext(agent = {}) {
+  return {
+    currency: String(agent.currency || 'BDT').trim().toUpperCase(),
+    countryCode: String(agent.countryCode || 'BD').trim().toUpperCase(),
+    country: String(agent.country || 'Bangladesh').trim(),
+  };
+}
+
+function getRatePercentLabel(rate) {
+  return `${roundMoney(Number(rate || 0) * 100)}%`;
+}
+
+function getLocalCommissionRuleNote(requestType, rate, currency) {
+  const per100 = roundMoney(100 * Number(rate || 0));
+  const per1 = roundMoney(1 * Number(rate || 0));
+  if (currency === 'USD') {
+    return `${per1} ${currency} per 1 ${currency}`;
+  }
+  return `${per100} ${currency} per 100 ${currency}`;
+}
+
 function getTimeParts(date = new Date()) {
   const timeZone = env.AGENT_COMMISSION_PAYOUT_TIMEZONE || 'Asia/Dhaka';
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -33,6 +54,8 @@ export function getAgentCommissionRate(type) {
 }
 
 export function calculateAgentCommission(type, amount) {
+  // Commission is always percentage based on the request amount in the agent's own currency.
+  // Example: BDT 100 deposit => BDT 6; USD 1 deposit => USD 0.06.
   const sourceAmount = Number(amount || 0);
   const rate = getAgentCommissionRate(type);
   if (!Number.isFinite(sourceAmount) || sourceAmount <= 0 || !Number.isFinite(rate) || rate <= 0) {
@@ -49,6 +72,7 @@ export async function recordAgentCommissionForRequest({ agent, request, transact
   const requestType = String(type || request?.type || '').toUpperCase();
   const sourceAmount = Number(request?.amount || transaction?.amount || 0);
   const { rate, amount: commissionAmount } = calculateAgentCommission(requestType, sourceAmount);
+  const currencyContext = getAgentCurrencyContext(agent);
 
   if (!agent?._id || !request?._id || commissionAmount <= 0) {
     return Agent.findById(agent?._id || request?.agent || null);
@@ -61,6 +85,9 @@ export async function recordAgentCommissionForRequest({ agent, request, transact
       agent: agent._id,
       agentId: agent.agentId || request.agentId,
       type: requestType,
+      currency: currencyContext.currency,
+      countryCode: currencyContext.countryCode,
+      country: currencyContext.country,
       sourceAmount,
       commissionRate: rate,
       commissionAmount,
@@ -69,7 +96,7 @@ export async function recordAgentCommissionForRequest({ agent, request, transact
       user: request.user?._id || request.user,
       userId: request.userId || '',
       earnedMonth: monthKey,
-      note: `${requestType === 'DEPOSIT' ? 'Deposit' : 'Withdraw'} commission ${roundMoney(rate * 100)}% for ${request.userId || 'user'}`,
+      note: `${requestType === 'DEPOSIT' ? 'Deposit' : 'Withdraw'} commission ${getRatePercentLabel(rate)} (${getLocalCommissionRuleNote(requestType, rate, currencyContext.currency)}) for ${request.userId || 'user'}`,
     });
   } catch (error) {
     // Duplicate means the same confirmed request was already counted.
@@ -131,14 +158,19 @@ export async function runMonthlyAgentCommissionPayout({ force = false } = {}) {
       { $set: { status: 'PAID', payoutMonth: monthKey, paidAt: new Date() } }
     );
 
+    const currencyContext = getAgentCurrencyContext(agent);
+
     await AgentTransaction.create({
       agent: agent._id,
       agentId: agent.agentId,
+      currency: currencyContext.currency,
+      countryCode: currencyContext.countryCode,
+      country: currencyContext.country,
       type: 'COMMISSION_PAYOUT',
       amount: commissionBalance,
       balanceBefore,
       balanceAfter: agent.balance,
-      note: `Monthly commission payout for ${monthKey}`,
+      note: `Monthly commission payout for ${monthKey} (${currencyContext.currency})`,
     });
 
     paidAgents += 1;
