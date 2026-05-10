@@ -57,7 +57,7 @@ const SYMBOL_RULES = {
 // Overall spin decision. The visible board is still generated from the exact rules above.
 const LIVE_SPIN_WEIGHTS = [
   { type: 'LOSE', weight: 7000 },
-  { type: 'WIN', weight: 3000 },
+  { type: 'WIN', weight: 2000 },
 ];
 
 const DEMO_SPIN_WEIGHTS = [
