@@ -12,6 +12,7 @@ import { creditWallet, debitWallet } from '../utils/wallet.js';
 import { env } from '../config/env.js';
 import { groupDepositMethodsByTitle, pickPrimaryDepositMethod } from '../utils/paymentMethodCanonical.js';
 import { assertUserCanDeposit, assertUserCanWithdraw } from '../utils/userPermissions.js';
+import { assertWithdrawalAllowedForUser } from '../services/withdrawalGuardService.js';
 
 function razorpayClient() {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) return null;
@@ -29,6 +30,8 @@ export const createWithdrawTransaction = asyncHandler(async (req, res) => {
   const type = String(req.body.type || 'WITHDRAW').toUpperCase();
   assertOrThrow(type === 'WITHDRAW', 'Only WITHDRAW transactions can be created here', 400);
   const method = optionalString(req.body.method, 40) || 'upi';
+
+  await assertWithdrawalAllowedForUser(req.user, amount);
 
   await debitWallet(req.user._id, amount, 'withdraw-request-hold');
 
@@ -473,6 +476,7 @@ export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
 
   assertOrThrow(methodKey, 'Withdrawal method is required', 400);
   assertOrThrow(receiverNumber, 'Receiving number/account is required', 400);
+  await assertWithdrawalAllowedForUser(req.user, amount);
   assertOrThrow((req.user.wallet || 0) >= amount, 'Insufficient wallet balance', 400);
 
   const globalMethods = await getGlobalDepositMethods(true);

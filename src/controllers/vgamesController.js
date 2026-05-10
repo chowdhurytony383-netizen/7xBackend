@@ -5,6 +5,7 @@ import Game from '../models/Game.js';
 import Bet from '../models/Bet.js';
 import { env } from '../config/env.js';
 import { assertUserCanPlay } from '../utils/userPermissions.js';
+import { recordWagerTurnover } from '../services/withdrawalGuardService.js';
 
 const SLOT_SYMBOLS = ['Symbol_1', 'Symbol_2', 'Symbol_3', 'Symbol_4', 'Symbol_5', 'Symbol_6'];
 const WILD_SYMBOLS = new Set(['Symbol_0', 'Wild', 'wild']);
@@ -1006,6 +1007,10 @@ async function handleBikiniSpin(req, res, user, game) {
     return res.status(400).json({ success: false, message: 'Insufficient balance' });
   }
 
+  await recordWagerTurnover(user._id, totalBet, 'vgames-bet').catch((error) => {
+    console.error('VGames turnover tracking failed:', error.message);
+  });
+
   const plan = pickBikiniSpinPlan(Boolean(user.is_demo_agent || user.isDemo || user.demoMode));
   let slots = plan.type === 'BIG_WIN'
     ? buildBikiniBigWinSlotIcons({ symbol: plan.symbol })
@@ -1220,6 +1225,10 @@ async function handleSpin(req, res, user, game) {
   if (!debitedUser) {
     return res.status(400).json({ success: false, message: 'Insufficient balance' });
   }
+
+  await recordWagerTurnover(user._id, totalBet, 'vgames-bet').catch((error) => {
+    console.error('VGames turnover tracking failed:', error.message);
+  });
 
   const plan = pickSpinPlan(Boolean(user.is_demo_agent || user.isDemo || user.demoMode));
   let slots;
