@@ -56,15 +56,13 @@ const SYMBOL_RULES = {
 
 // Overall spin decision. The visible board is still generated from the exact rules above.
 const LIVE_SPIN_WEIGHTS = [
-  { type: 'LOSE', weight: 6500 },
+  { type: 'LOSE', weight: 7000 },
   { type: 'WIN', weight: 3000 },
-  { type: 'BIG_WIN', weight: 500 },
 ];
 
 const DEMO_SPIN_WEIGHTS = [
-  { type: 'LOSE', weight: 5000 },
-  { type: 'WIN', weight: 4200 },
-  { type: 'BIG_WIN', weight: 800 },
+  { type: 'LOSE', weight: 5500 },
+  { type: 'WIN', weight: 4500 },
 ];
 
 // Higher payout cards appear less often.
@@ -221,7 +219,8 @@ function evaluateSlotIcons(slots, totalBet) {
 
   let winType = 'LOSE';
   if (winAmount > 0) {
-    winType = x10MultiplierApplied || activeLines.length >= 2 || totalMultiplier >= 10 ? 'BIG_WIN' : 'WIN';
+    // BIG_WIN is disabled for Fortune Tiger. All winning outcomes are returned as normal WIN.
+    winType = 'WIN';
   }
 
   return {
@@ -356,15 +355,6 @@ function pickSpinPlan(isDemoMode = false) {
     return { type: 'LOSE', payline: null, paylines: [], symbol: null };
   }
 
-  if (outcome.type === 'BIG_WIN') {
-    return {
-      type: 'BIG_WIN',
-      payline: PAYLINES[0],
-      paylines: PAYLINES,
-      symbol: weightedPick(WIN_SYMBOL_WEIGHTS).symbol,
-    };
-  }
-
   const payline = pick(PAYLINES);
   return {
     type: 'WIN',
@@ -399,8 +389,9 @@ function rulesPayload() {
         condition: 'ALL_9_VISIBLE_POSITIONS_ACTIVE_IN_WINNING_PAYLINES',
       },
       big_win_rules: {
-        description: 'BIG WIN is used when x10 is applied, or when 2 or more active paylines win in one spin, or when total multiplier is 10x or more.',
-        conditions: ['X10_MULTIPLIER_APPLIED', '2_OR_MORE_PAYLINES', 'TOTAL_MULTIPLIER_GTE_10'],
+        description: 'BIG WIN is disabled. Winning spins are returned as normal WIN only.',
+        conditions: [],
+        disabled: true,
       },
       symbol_rules: Object.entries(SYMBOL_RULES).map(([symbol, rule]) => ({
         symbol,
@@ -704,7 +695,8 @@ function evaluateBikiniSlotIcons(slots, lineBet) {
 
   let winType = 'LOSE';
   if (winAmount > 0) {
-    winType = x10MultiplierApplied || activeLines.length >= 3 || totalMultiplier >= 50 ? 'BIG_WIN' : 'WIN';
+    // BIG_WIN is disabled. All winning outcomes are returned as normal WIN.
+    winType = 'WIN';
   }
 
   return {
@@ -785,23 +777,13 @@ function buildBikiniBigWinSlotIcons({ symbol }) {
 
 function pickBikiniSpinPlan(isDemoMode = false) {
   const spinTable = isDemoMode
-    ? [{ type: 'LOSE', weight: 4500 }, { type: 'WIN', weight: 4500 }, { type: 'BIG_WIN', weight: 1000 }]
-    : [{ type: 'LOSE', weight: 6800 }, { type: 'WIN', weight: 2900 }, { type: 'BIG_WIN', weight: 300 }];
+    ? [{ type: 'LOSE', weight: 5500 }, { type: 'WIN', weight: 4500 }]
+    : [{ type: 'LOSE', weight: 7000 }, { type: 'WIN', weight: 3000 }];
 
   const outcome = weightedPick(spinTable);
 
   if (outcome.type === 'LOSE') {
     return { type: 'LOSE', payline: null, paylines: [], symbol: null, combine: 0 };
-  }
-
-  if (outcome.type === 'BIG_WIN') {
-    return {
-      type: 'BIG_WIN',
-      payline: BIKINI_PAYLINES[0],
-      paylines: BIKINI_PAYLINES,
-      symbol: weightedPick(BIKINI_WIN_SYMBOL_WEIGHTS).symbol,
-      combine: 5,
-    };
   }
 
   const payline = pick(BIKINI_PAYLINES);
@@ -837,8 +819,9 @@ function bikiniRulesPayload() {
         condition: 'ALL_15_VISIBLE_POSITIONS_ACTIVE_IN_WINNING_PAYLINES',
       },
       big_win_rules: {
-        description: 'BIG WIN is used when x10 is applied, or when 3 or more active paylines win in one spin, or when total multiplier is 50x or more.',
-        conditions: ['X10_MULTIPLIER_APPLIED', '3_OR_MORE_PAYLINES', 'TOTAL_MULTIPLIER_GTE_50'],
+        description: 'BIG WIN is disabled. Winning spins are returned as normal WIN only.',
+        conditions: [],
+        disabled: true,
       },
       symbol_rules: Object.entries(BIKINI_SYMBOL_RULES).map(([symbol, rule]) => ({
         symbol,
@@ -1012,11 +995,9 @@ async function handleBikiniSpin(req, res, user, game) {
   });
 
   const plan = pickBikiniSpinPlan(Boolean(user.is_demo_agent || user.isDemo || user.demoMode));
-  let slots = plan.type === 'BIG_WIN'
-    ? buildBikiniBigWinSlotIcons({ symbol: plan.symbol })
-    : plan.type === 'WIN'
-      ? buildBikiniWinSlotIcons({ payline: plan.payline, symbol: plan.symbol, combine: plan.combine })
-      : buildBikiniLoseSlotIcons();
+  let slots = plan.type === 'WIN'
+    ? buildBikiniWinSlotIcons({ payline: plan.payline, symbol: plan.symbol, combine: plan.combine })
+    : buildBikiniLoseSlotIcons();
 
   let evaluation = evaluateBikiniSlotIcons(slots, lineBet);
 
@@ -1025,10 +1006,8 @@ async function handleBikiniSpin(req, res, user, game) {
     evaluation = evaluateBikiniSlotIcons(slots, lineBet);
   }
 
-  if ((plan.type === 'WIN' || plan.type === 'BIG_WIN') && !evaluation.isWin) {
-    slots = plan.type === 'BIG_WIN'
-      ? buildBikiniBigWinSlotIcons({ symbol: plan.symbol })
-      : buildBikiniWinSlotIcons({ payline: plan.payline, symbol: plan.symbol, combine: plan.combine });
+  if (plan.type === 'WIN' && !evaluation.isWin) {
+    slots = buildBikiniWinSlotIcons({ payline: plan.payline, symbol: plan.symbol, combine: plan.combine });
     evaluation = evaluateBikiniSlotIcons(slots, lineBet);
   }
 
@@ -1132,12 +1111,12 @@ function createSpinView({ finalWallet, totalBet, betAmountRaw, cpl, numLine, eva
       result: isWin ? 'WIN' : 'LOSE',
       win_type: evaluation.winType,
       display_result: evaluation.winType,
-      big_win: evaluation.winType === 'BIG_WIN',
+      big_win: false,
       audit_hash: auditHash,
       rules: {
         win_condition: '3 same symbols/cards on one horizontal left-right payline or one X/diagonal payline',
         lose_condition: 'no matching 3-symbol horizontal or X/diagonal payline',
-        big_win_condition: 'x10 applied, 2 or more active paylines win, or total multiplier is 10x or more',
+        big_win_condition: 'BIG WIN disabled. Winning spins are returned as normal WIN only.',
         x10_multiplier_condition: 'all 9 visible symbols are involved in winning paylines',
         x10_multiplier_applied: evaluation.x10MultiplierApplied,
         all_visible_icons_involved: evaluation.allVisibleIconsInvolved,
@@ -1233,9 +1212,7 @@ async function handleSpin(req, res, user, game) {
   const plan = pickSpinPlan(Boolean(user.is_demo_agent || user.isDemo || user.demoMode));
   let slots;
 
-  if (plan.type === 'BIG_WIN') {
-    slots = buildBigWinSlotIcons({ symbol: plan.symbol });
-  } else if (plan.type === 'WIN') {
+  if (plan.type === 'WIN') {
     slots = buildWinSlotIcons({ payline: plan.payline, symbol: plan.symbol });
   } else {
     slots = buildLoseSlotIcons();
@@ -1255,11 +1232,7 @@ async function handleSpin(req, res, user, game) {
     evaluation = evaluateSlotIcons(slots, totalBet);
   }
 
-  // Safety guard: a forced big win must always produce BIG_WIN.
-  if (plan.type === 'BIG_WIN' && evaluation.winType !== 'BIG_WIN') {
-    slots = buildBigWinSlotIcons({ symbol: plan.symbol });
-    evaluation = evaluateSlotIcons(slots, totalBet);
-  }
+  // BIG_WIN is disabled; no forced big-win repair is needed.
 
   const serverSeed = crypto.randomBytes(32).toString('hex');
   const clientSeed = clientSeedFromRequest(req);
@@ -1314,7 +1287,7 @@ async function handleSpin(req, res, user, game) {
         simultaneous_wins: 'simultaneous wins on different bet lines are added',
         x10_multiplier: 'when all 9 visible symbols are involved in winning paylines, total win is multiplied by x10',
         vertical_top_bottom: 'positions [1,2,3], [4,5,6], and [7,8,9] are disabled and do not count as win',
-        big_win: 'x10 applied, 2 or more active paylines win in one spin, or total multiplier is 10x or more',
+        big_win: 'BIG WIN disabled. Winning spins are returned as normal WIN only.',
       },
       symbolRules: SYMBOL_RULES,
       paylines: PAYLINES,
@@ -1436,7 +1409,7 @@ function historyDetailFromBet(bet) {
       spin_date: date,
       spin_hour: time,
       result_data: [{
-        spin_title: result === 'BIG_WIN' ? 'Big Win Result' : bet.isWin ? 'Win Result' : 'Lose Result',
+        spin_title: bet.isWin ? 'Win Result' : 'Lose Result',
         transaction: bet._id.toString(),
         result,
         total_bet: money(bet.betAmount),
