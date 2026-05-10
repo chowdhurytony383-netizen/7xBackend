@@ -19,7 +19,9 @@ function normalizeKey(value) {
 }
 
 function allowedWithdrawKeys() {
-  return String(env.CRYPTO_WITHDRAW_ALLOWED_METHODS || '')
+  const configured = String(env.CRYPTO_WITHDRAW_ALLOWED_METHODS || '').trim();
+  const fallback = String(env.CRYPTO_ENABLED_METHODS || 'BNB,USDT_BEP20').trim();
+  return (configured || fallback)
     .split(',')
     .map((item) => normalizeKey(item))
     .filter(Boolean);
@@ -101,8 +103,16 @@ function validateCryptoAddress(method, address) {
 
 export async function getCryptoWithdrawOptions() {
   await syncDefaultCryptoMethods();
+
+  if (!env.CRYPTO_WITHDRAW_ENABLED) return [];
+
   const keys = new Set(allowedWithdrawKeys());
-  const methods = await CryptoMethod.find({ enabled: true }).sort({ sortOrder: 1, displayName: 1 });
+
+  // Important: withdraw methods are controlled by CRYPTO_WITHDRAW_ALLOWED_METHODS, not only
+  // CRYPTO_ENABLED_METHODS. This allows deposit methods and withdraw methods to be different
+  // and keeps crypto withdraw visible for users from every country.
+  const methods = await CryptoMethod.find({}).sort({ sortOrder: 1, displayName: 1 });
+
   return methods
     .filter((method) => keys.has(normalizeKey(method.key)))
     .filter((method) => method.withdrawEnabled !== false)
