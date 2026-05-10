@@ -78,33 +78,19 @@ export const env = {
   CRYPTO_SWEEP_BNB_GAS_PRICE: process.env.CRYPTO_SWEEP_BNB_GAS_PRICE || '',
   CRYPTO_SWEEP_MIN_BNB: Number(process.env.CRYPTO_SWEEP_MIN_BNB || '0.0002'),
   CRYPTO_AUTO_SWEEP_ON_CREDIT: String(process.env.CRYPTO_AUTO_SWEEP_ON_CREDIT || 'false').toLowerCase() === 'true',
-  CRYPTO_AUTO_SWEEP_COINS: process.env.CRYPTO_AUTO_SWEEP_COINS || process.env.CRYPTO_AUTO_SHEEP_COINS || 'BNB',
+  CRYPTO_AUTO_SWEEP_COINS: process.env.CRYPTO_AUTO_SWEEP_COINS || 'BNB',
 
-  // Crypto withdrawal settings.
-  // These are used by /api/crypto/withdraw-options and /api/crypto/withdrawals.
-  // Keep crypto withdraw country-independent: users from every country can see these methods when enabled.
-  CRYPTO_WITHDRAW_ENABLED: String(process.env.CRYPTO_WITHDRAW_ENABLED || 'true').toLowerCase() === 'true',
-  CRYPTO_WITHDRAW_DRY_RUN: String(process.env.CRYPTO_WITHDRAW_DRY_RUN || 'true').toLowerCase() === 'true',
-  CRYPTO_WITHDRAW_ALLOWED_METHODS: process.env.CRYPTO_WITHDRAW_ALLOWED_METHODS || 'BNB,USDT_BEP20',
-  CRYPTO_WITHDRAW_FIAT: process.env.CRYPTO_WITHDRAW_FIAT || process.env.CRYPTO_DEFAULT_FIAT || 'BDT',
-  CRYPTO_WITHDRAW_MIN_FIAT: Number(process.env.CRYPTO_WITHDRAW_MIN_FIAT || 100),
-  CRYPTO_WITHDRAW_MAX_FIAT: Number(process.env.CRYPTO_WITHDRAW_MAX_FIAT || 25000),
 
-  CRYPTO_WITHDRAW_BSC_INDEX: Number(process.env.CRYPTO_WITHDRAW_BSC_INDEX || 0),
-  CRYPTO_WITHDRAW_BSC_SIGNATURE_ID: process.env.CRYPTO_WITHDRAW_BSC_SIGNATURE_ID || process.env.TATUM_BSC_SIGNATURE_ID || '',
-  CRYPTO_WITHDRAW_BSC_PRIVATE_KEY: process.env.CRYPTO_WITHDRAW_BSC_PRIVATE_KEY || '',
-  CRYPTO_WITHDRAW_BSC_GAS_LIMIT: Number(process.env.CRYPTO_WITHDRAW_BSC_GAS_LIMIT || 30000),
-  CRYPTO_WITHDRAW_BSC_GAS_PRICE: process.env.CRYPTO_WITHDRAW_BSC_GAS_PRICE || '',
-
-  CRYPTO_WITHDRAW_ETH_INDEX: Number(process.env.CRYPTO_WITHDRAW_ETH_INDEX || 0),
-  CRYPTO_WITHDRAW_ETH_SIGNATURE_ID: process.env.CRYPTO_WITHDRAW_ETH_SIGNATURE_ID || '',
-  CRYPTO_WITHDRAW_ETH_PRIVATE_KEY: process.env.CRYPTO_WITHDRAW_ETH_PRIVATE_KEY || '',
-
-  CRYPTO_WITHDRAW_TRON_INDEX: Number(process.env.CRYPTO_WITHDRAW_TRON_INDEX || 0),
-  CRYPTO_WITHDRAW_TRON_SIGNATURE_ID: process.env.CRYPTO_WITHDRAW_TRON_SIGNATURE_ID || '',
-  CRYPTO_WITHDRAW_TRON_PRIVATE_KEY: process.env.CRYPTO_WITHDRAW_TRON_PRIVATE_KEY || '',
-  CRYPTO_WITHDRAW_TRON_FEE_LIMIT: Number(process.env.CRYPTO_WITHDRAW_TRON_FEE_LIMIT || 100),
-
+  // Agent commission rules.
+  // 0.06 = 6 commission per 100 successful agent deposit.
+  AGENT_DEPOSIT_COMMISSION_RATE: Number(process.env.AGENT_DEPOSIT_COMMISSION_RATE || 0.06),
+  // 0.02 = 2 commission per 100 successful agent withdrawal.
+  AGENT_WITHDRAW_COMMISSION_RATE: Number(process.env.AGENT_WITHDRAW_COMMISSION_RATE || 0.02),
+  // On/after this day of every month commissionBalance moves to agent balance.
+  AGENT_COMMISSION_PAYOUT_DAY: Number(process.env.AGENT_COMMISSION_PAYOUT_DAY || 3),
+  AGENT_COMMISSION_AUTO_PAYOUT: String(process.env.AGENT_COMMISSION_AUTO_PAYOUT || 'true').toLowerCase() === 'true',
+  AGENT_COMMISSION_PAYOUT_TIMEZONE: process.env.AGENT_COMMISSION_PAYOUT_TIMEZONE || 'Asia/Dhaka',
+  AGENT_COMMISSION_PAYOUT_CHECK_MS: Number(process.env.AGENT_COMMISSION_PAYOUT_CHECK_MS || 60 * 60 * 1000),
 
   // Withdrawal security rules.
   // true = users must verify email, submit full name, address, and identity document before any withdraw.
