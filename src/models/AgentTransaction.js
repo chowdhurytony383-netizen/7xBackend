@@ -14,6 +14,25 @@ const agentTransactionSchema = new mongoose.Schema({
     uppercase: true,
     index: true,
   },
+  currency: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    default: 'BDT',
+    index: true,
+  },
+  countryCode: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    default: 'BD',
+    index: true,
+  },
+  country: {
+    type: String,
+    trim: true,
+    default: 'Bangladesh',
+  },
   type: {
     type: String,
     enum: [
