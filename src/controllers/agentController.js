@@ -196,8 +196,17 @@ export const agentLogin = asyncHandler(async (req, res) => {
   agent.lastLoginAt = new Date();
   await agent.save();
 
-  setAgentCookie(res, agent);
-  res.json({ success: true, message: 'Agent login successful', data: { agent: sanitizeAgent(agent) } });
+  const agentToken = setAgentCookie(res, agent);
+  res.json({
+    success: true,
+    message: 'Agent login successful',
+    data: {
+      agent: sanitizeAgent(agent),
+      agentToken,
+      tokens: { agentToken },
+    },
+    agentToken,
+  });
 });
 
 export const agentLogout = asyncHandler(async (_req, res) => {
