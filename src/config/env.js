@@ -81,6 +81,14 @@ export const env = {
   CRYPTO_AUTO_SWEEP_COINS: process.env.CRYPTO_AUTO_SWEEP_COINS || 'BNB',
 
 
+  // Withdrawal security rules.
+  // true = users must verify email, submit full name, address, and identity document before any withdraw.
+  WITHDRAW_KYC_REQUIRED: String(process.env.WITHDRAW_KYC_REQUIRED || 'true').toLowerCase() === 'true',
+  // true = every deposit/bonus must be wagered before the user can withdraw that balance.
+  WITHDRAW_TURNOVER_REQUIRED: String(process.env.WITHDRAW_TURNOVER_REQUIRED || 'true').toLowerCase() === 'true',
+  // 1 = deposit 100 requires 100 total bets before withdraw; 2 = deposit 100 requires 200 bets.
+  WITHDRAW_TURNOVER_MULTIPLIER: Number(process.env.WITHDRAW_TURNOVER_MULTIPLIER || 1),
+
   // Free/low-cost automatic sports betting system.
   // Requires a free odds API key such as The Odds API.
   SPORTS_AUTO_SYSTEM_ENABLED: String(process.env.SPORTS_AUTO_SYSTEM_ENABLED || 'true').toLowerCase() === 'true',
@@ -90,13 +98,13 @@ export const env = {
   SPORTS_AUTO_SPORT_KEYS: process.env.SPORTS_AUTO_SPORT_KEYS || 'all',
   SPORTS_AUTO_SYNC_ACTIVE_SPORTS: String(process.env.SPORTS_AUTO_SYNC_ACTIVE_SPORTS || 'true').toLowerCase() === 'true',
   SPORTS_ACTIVE_SPORTS_TTL_SECONDS: Number(process.env.SPORTS_ACTIVE_SPORTS_TTL_SECONDS || 1800),
-  SPORTS_AUTO_MAX_SPORTS_PER_SYNC: Number(process.env.SPORTS_AUTO_MAX_SPORTS_PER_SYNC || 12),
+  SPORTS_AUTO_MAX_SPORTS_PER_SYNC: Number(process.env.SPORTS_AUTO_MAX_SPORTS_PER_SYNC || 80),
   SPORTS_DEFAULT_REGIONS: process.env.SPORTS_DEFAULT_REGIONS || 'us,uk,eu,au',
   SPORTS_DEFAULT_MARKETS: process.env.SPORTS_DEFAULT_MARKETS || 'h2h',
   SPORTS_ODDS_FORMAT: process.env.SPORTS_ODDS_FORMAT || 'decimal',
   SPORTS_PREFERRED_BOOKMAKERS: process.env.SPORTS_PREFERRED_BOOKMAKERS || 'bet365,pinnacle,williamhill,betfair,unibet',
-  SPORTS_ODDS_SYNC_TTL_SECONDS: Number(process.env.SPORTS_ODDS_SYNC_TTL_SECONDS || 120),
-  SPORTS_SCORE_SYNC_TTL_SECONDS: Number(process.env.SPORTS_SCORE_SYNC_TTL_SECONDS || 120),
+  SPORTS_ODDS_SYNC_TTL_SECONDS: Number(process.env.SPORTS_ODDS_SYNC_TTL_SECONDS || 30),
+  SPORTS_SCORE_SYNC_TTL_SECONDS: Number(process.env.SPORTS_SCORE_SYNC_TTL_SECONDS || 30),
   SPORTS_HIDE_STARTED_OLDER_HOURS: Number(process.env.SPORTS_HIDE_STARTED_OLDER_HOURS || 24),
   SPORTS_ODDS_STALE_SECONDS: Number(process.env.SPORTS_ODDS_STALE_SECONDS || 900),
   SPORTS_MIN_STAKE: Number(process.env.SPORTS_MIN_STAKE || 1),
@@ -104,36 +112,6 @@ export const env = {
   SPORTS_AUTO_SETTLEMENT_ENABLED: String(process.env.SPORTS_AUTO_SETTLEMENT_ENABLED || 'true').toLowerCase() === 'true',
   SPORTS_AUTO_SETTLEMENT_MIN_DELAY_MINUTES: Number(process.env.SPORTS_AUTO_SETTLEMENT_MIN_DELAY_MINUTES || 15),
   SPORTS_AUTO_REVIEW_ABOVE_AMOUNT: Number(process.env.SPORTS_AUTO_REVIEW_ABOVE_AMOUNT || 0),
-  SPORTS_PROVIDER_TIMEOUT_MS: Number(process.env.SPORTS_PROVIDER_TIMEOUT_MS || 12000),
-  SPORTS_RESPONSE_CACHE_SECONDS: Number(process.env.SPORTS_RESPONSE_CACHE_SECONDS || 6),
-  SPORTS_CATEGORIES_CACHE_SECONDS: Number(process.env.SPORTS_CATEGORIES_CACHE_SECONDS || 30),
-  SPORTS_RESPONSE_MATCH_LIMIT: Number(process.env.SPORTS_RESPONSE_MATCH_LIMIT || 80),
-  SPORTS_SETTLEMENT_SYNC_TTL_SECONDS: Number(process.env.SPORTS_SETTLEMENT_SYNC_TTL_SECONDS || 120),
-
-  SPORTS_DETAILS_ENABLED: String(process.env.SPORTS_DETAILS_ENABLED || 'false').toLowerCase() === 'true',
-  SPORTS_DETAILS_PROVIDER: process.env.SPORTS_DETAILS_PROVIDER || 'hybrid',
-  SPORTMONKS_API_TOKEN: process.env.SPORTMONKS_API_TOKEN || '',
-  SPORTMONKS_BASE_URL: process.env.SPORTMONKS_BASE_URL || 'https://api.sportmonks.com/v3/football',
-  SPORTMONKS_INCLUDE: process.env.SPORTMONKS_INCLUDE || '',
-  SPORTS_DETAILS_CACHE_SECONDS: Number(process.env.SPORTS_DETAILS_CACHE_SECONDS || 120),
-  SPORTS_DETAILS_TIMEOUT_MS: Number(process.env.SPORTS_DETAILS_TIMEOUT_MS || 12000),
-  SPORTS_DETAILS_MATCH_THRESHOLD: Number(process.env.SPORTS_DETAILS_MATCH_THRESHOLD || 0.35),
-
-  SPORTS_MULTI_DETAILS_ENABLED: String(process.env.SPORTS_MULTI_DETAILS_ENABLED || 'false').toLowerCase() === 'true',
-  APISPORTS_API_KEY: process.env.APISPORTS_API_KEY || process.env.API_SPORTS_KEY || '',
-  APISPORTS_CACHE_SECONDS: Number(process.env.APISPORTS_CACHE_SECONDS || process.env.SPORTS_DETAILS_CACHE_SECONDS || 120),
-  APISPORTS_TIMEOUT_MS: Number(process.env.APISPORTS_TIMEOUT_MS || process.env.SPORTS_DETAILS_TIMEOUT_MS || 12000),
-  APISPORTS_MATCH_THRESHOLD: Number(process.env.APISPORTS_MATCH_THRESHOLD || process.env.SPORTS_DETAILS_MATCH_THRESHOLD || 0.35),
-  APISPORTS_FOOTBALL_BASE_URL: process.env.APISPORTS_FOOTBALL_BASE_URL || 'https://v3.football.api-sports.io',
-  APISPORTS_BASKETBALL_BASE_URL: process.env.APISPORTS_BASKETBALL_BASE_URL || 'https://v1.basketball.api-sports.io',
-  APISPORTS_BASEBALL_BASE_URL: process.env.APISPORTS_BASEBALL_BASE_URL || 'https://v1.baseball.api-sports.io',
-  APISPORTS_HOCKEY_BASE_URL: process.env.APISPORTS_HOCKEY_BASE_URL || 'https://v1.hockey.api-sports.io',
-  APISPORTS_AMERICAN_FOOTBALL_BASE_URL: process.env.APISPORTS_AMERICAN_FOOTBALL_BASE_URL || 'https://v1.american-football.api-sports.io',
-  APISPORTS_RUGBY_BASE_URL: process.env.APISPORTS_RUGBY_BASE_URL || 'https://v1.rugby.api-sports.io',
-  APISPORTS_VOLLEYBALL_BASE_URL: process.env.APISPORTS_VOLLEYBALL_BASE_URL || 'https://v1.volleyball.api-sports.io',
-  APISPORTS_HANDBALL_BASE_URL: process.env.APISPORTS_HANDBALL_BASE_URL || 'https://v1.handball.api-sports.io',
-  APISPORTS_AFL_BASE_URL: process.env.APISPORTS_AFL_BASE_URL || 'https://v1.afl.api-sports.io',
-  APISPORTS_MMA_BASE_URL: process.env.APISPORTS_MMA_BASE_URL || 'https://v1.mma.api-sports.io',
 
   // Kept only for old direct_test compatibility. Do not use in production.
   TATUM_BSC_MNEMONIC: process.env.TATUM_BSC_MNEMONIC || '',
