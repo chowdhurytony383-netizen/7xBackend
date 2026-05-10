@@ -7,6 +7,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/appError.js';
 import { creditWallet, debitWallet } from '../utils/wallet.js';
 import { optionalString } from '../utils/validation.js';
+import { recordAgentCommissionForRequest } from '../services/agentCommissionService.js';
 
 function normalizeType(type) {
   const value = String(type || '').toUpperCase();
@@ -87,10 +88,17 @@ export const confirmAgentRequest = asyncHandler(async (req, res) => {
       note: `Confirmed deposit for ${request.userId}`,
     });
 
+    const commissionAgent = await recordAgentCommissionForRequest({
+      agent: updatedAgent,
+      request,
+      transaction,
+      type: 'DEPOSIT',
+    });
+
     return res.json({
       success: true,
-      message: 'Deposit confirmed. User wallet credited and agent balance deducted.',
-      data: { request, transaction, agent: updatedAgent, user: updatedUser },
+      message: 'Deposit confirmed. User wallet credited, agent balance deducted, and agent commission added.',
+      data: { request, transaction, agent: commissionAgent || updatedAgent, user: updatedUser },
     });
   }
 
@@ -140,12 +148,19 @@ export const confirmAgentRequest = asyncHandler(async (req, res) => {
       note: `Confirmed withdrawal for ${request.userId}`,
     });
 
+    const commissionAgent = await recordAgentCommissionForRequest({
+      agent: updatedAgent,
+      request,
+      transaction,
+      type: 'WITHDRAW',
+    });
+
     return res.json({
       success: true,
       message: walletHeld
-        ? 'Withdrawal confirmed. Held wallet amount released and agent balance credited.'
-        : 'Withdrawal confirmed. User wallet deducted and agent balance credited.',
-      data: { request, transaction, agent: updatedAgent, user: updatedUser },
+        ? 'Withdrawal confirmed. Held wallet amount released, agent balance credited, and agent commission added.'
+        : 'Withdrawal confirmed. User wallet deducted, agent balance credited, and agent commission added.',
+      data: { request, transaction, agent: commissionAgent || updatedAgent, user: updatedUser },
     });
   }
 
