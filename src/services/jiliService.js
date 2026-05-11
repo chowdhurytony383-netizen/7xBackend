@@ -55,7 +55,22 @@ export function normalizeCurrency(currency = '') {
   return value || env.JILI_CURRENCY || 'BDT';
 }
 
-export function buildJiliUsername(user = {}) {
+export function getJiliPlayerCurrency(user = {}) {
+  if (env.JILI_FORCE_BIND_CURRENCY) return normalizeCurrency(env.JILI_CURRENCY);
+
+  // IMPORTANT: when multi-currency is enabled, prefer the user's currency first.
+  // The previous implementation used env.JILI_CURRENCY before user.currency,
+  // which forced every player to BDT/Tk even when JILI_FORCE_BIND_CURRENCY=false.
+  return normalizeCurrency(
+    user.currency
+    || user.walletCurrency
+    || user.preferredCurrency
+    || env.JILI_CURRENCY
+    || 'BDT'
+  );
+}
+
+export function buildJiliUsername(user = {}, currencyOverride = '') {
   const prefix = String(env.JILI_USERNAME_PREFIX || '7xbet_')
     .trim()
     .replace(/[^a-zA-Z0-9_]/g, '') || '7xbet_';
@@ -64,14 +79,17 @@ export function buildJiliUsername(user = {}) {
   const cleanId = String(rawId)
     .trim()
     .replace(/[^a-zA-Z0-9_]/g, '')
-    .slice(0, 42);
+    .slice(0, 40);
+
+  // JILI binds a player account to the first currency returned by /auth.
+  // For multi-currency, use a currency-specific JILI username so the same site user
+  // can safely open JILI under BDT/INR/USD/etc. without currency mismatch.
+  if (!env.JILI_FORCE_BIND_CURRENCY) {
+    const currency = normalizeCurrency(currencyOverride || getJiliPlayerCurrency(user)).toLowerCase();
+    return `${prefix}${currency}_${cleanId}`.slice(0, 50);
+  }
 
   return `${prefix}${cleanId}`.slice(0, 50);
-}
-
-export function getJiliPlayerCurrency(user = {}) {
-  if (env.JILI_FORCE_BIND_CURRENCY) return normalizeCurrency(env.JILI_CURRENCY);
-  return normalizeCurrency(env.JILI_CURRENCY || user.currency || 'BDT');
 }
 
 export async function createJiliTokenForUser(user, { gameId = '', ip = '', userAgent = '' } = {}) {
@@ -79,8 +97,8 @@ export async function createJiliTokenForUser(user, { gameId = '', ip = '', userA
     ? env.JILI_TOKEN_TTL_MINUTES
     : 60;
   const token = crypto.randomBytes(32).toString('hex');
-  const username = buildJiliUsername(user);
   const currency = getJiliPlayerCurrency(user);
+  const username = buildJiliUsername(user, currency);
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
   await JiliToken.create({
