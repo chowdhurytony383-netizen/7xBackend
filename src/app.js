@@ -32,6 +32,7 @@ import depositMethodRoutes from './routes/depositMethodRoutes.js';
 import crashGameRoutes from './routes/crashGameRoutes.js';
 import cryptoRoutes from './routes/cryptoRoutes.js';
 import adminCryptoRoutes from './routes/adminCryptoRoutes.js';
+import jiliRoutes from './routes/jiliRoutes.js';
 
 // 7X Crush provider launch route
 import crushProviderLaunchRoutes from './routes/crushProviderLaunchRoutes.js';
@@ -128,6 +129,7 @@ app.use('/api/games', gameRoutes);
 app.use('/api/crash', crashGameRoutes);
 app.use('/api/crypto', cryptoRoutes);
 app.use('/api/source-games', sourceGameRoutes);
+app.use('/api/jili', jiliRoutes);
 
 app.use('/api/agent', agentRoutes);
 app.use('/api/agent', agentPaymentRoutes);
