@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const transactionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  type: { type: String, enum: ['DEPOSIT', 'WITHDRAW'], required: true, index: true },
+  type: { type: String, enum: ['DEPOSIT', 'WITHDRAW', 'BONUS'], required: true, index: true },
   amount: { type: Number, required: true, min: 0 },
   status: { type: String, enum: ['PENDING', 'PROCESSING', 'SUCCESS', 'FAILED', 'REJECTED', 'CANCELLED'], default: 'PENDING', index: true },
   method: { type: String, default: '' },
@@ -21,6 +21,8 @@ const transactionSchema = new mongoose.Schema({
   agentId: { type: String, default: '', index: true },
   agentPaymentRequest: { type: mongoose.Schema.Types.ObjectId, ref: 'AgentPaymentRequest' },
   methodKey: { type: String, default: '' },
+  currency: { type: String, trim: true, uppercase: true, default: '' },
+  balanceType: { type: String, enum: ['MAIN', 'BONUS'], default: 'MAIN', index: true },
   userNote: { type: String, default: '' },
   agentNote: { type: String, default: '' },
 }, { timestamps: true });
