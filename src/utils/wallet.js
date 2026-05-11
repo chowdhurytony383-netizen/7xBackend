@@ -17,7 +17,7 @@ export async function debitWallet(userId, amount, source = '') {
   return user;
 }
 
-export async function creditWallet(userId, amount, source = '') {
+export async function creditWallet(userId, amount, source = '', options = {}) {
   const user = await User.findByIdAndUpdate(
     userId,
     { $inc: { wallet: amount } },
@@ -25,7 +25,13 @@ export async function creditWallet(userId, amount, source = '') {
   );
   if (!user) throw new AppError('User not found', 404);
   const snapshot = await WalletSnapshot.create({ user: userId, walletAmount: user.wallet, actualWalletAfterBets: user.wallet, netBetResult: amount, source });
-  await recordTurnoverCredit({ userId, amount, source, sourceRef: snapshot._id }).catch((error) => {
+  await recordTurnoverCredit({
+    userId,
+    amount,
+    source,
+    sourceRef: options.turnoverSourceRef || snapshot._id,
+    meta: options.turnoverMeta || {},
+  }).catch((error) => {
     console.error('Turnover credit tracking failed:', error.message);
   });
   return user;
