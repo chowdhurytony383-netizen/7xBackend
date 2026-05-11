@@ -80,6 +80,17 @@ export const env = {
   CRYPTO_AUTO_SWEEP_ON_CREDIT: String(process.env.CRYPTO_AUTO_SWEEP_ON_CREDIT || 'false').toLowerCase() === 'true',
   CRYPTO_AUTO_SWEEP_COINS: process.env.CRYPTO_AUTO_SWEEP_COINS || 'BNB',
 
+  // First deposit bonus rules.
+  // The bonus is 100% of the first successful deposit, capped at BDT 15,000 or the user's local-currency equivalent.
+  FIRST_DEPOSIT_BONUS_ENABLED: String(process.env.FIRST_DEPOSIT_BONUS_ENABLED || 'true').toLowerCase() === 'true',
+  FIRST_DEPOSIT_BONUS_BASE_CAP_BDT: Number(process.env.FIRST_DEPOSIT_BONUS_BASE_CAP_BDT || 15000),
+  FIRST_DEPOSIT_BONUS_USE_LIVE_RATES: String(process.env.FIRST_DEPOSIT_BONUS_USE_LIVE_RATES || 'true').toLowerCase() === 'true',
+  FIRST_DEPOSIT_BONUS_EXCHANGE_API_URL: process.env.FIRST_DEPOSIT_BONUS_EXCHANGE_API_URL || 'https://open.er-api.com/v6/latest/BDT',
+  FIRST_DEPOSIT_BONUS_RATE_CACHE_MS: Number(process.env.FIRST_DEPOSIT_BONUS_RATE_CACHE_MS || 6 * 60 * 60 * 1000),
+  // Optional JSON override. Example: {"USD":0.0082,"INR":0.68,"XAF":5.0}
+  FIRST_DEPOSIT_BONUS_BDT_RATES_JSON: process.env.FIRST_DEPOSIT_BONUS_BDT_RATES_JSON || '',
+  // Optional direct cap override by currency. Example: {"USD":123,"BDT":15000}
+  FIRST_DEPOSIT_BONUS_CAPS_JSON: process.env.FIRST_DEPOSIT_BONUS_CAPS_JSON || '',
 
   // Agent commission rules.
   // Percentage in the agent's own currency. Example: BDT 100 -> BDT 6, USD 1 -> USD 0.06.
