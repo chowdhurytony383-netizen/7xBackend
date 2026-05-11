@@ -16,7 +16,8 @@
     "crypto:sweep-bnb": "node src/seed/sweepPendingBnbDeposits.js",
     "crypto:auto-sweep": "node src/seed/triggerAutoSweepForPendingDeposits.js",
     "sports:sync": "node src/seed/syncSportsNow.js",
-    "sports:clear-old": "node src/seed/clearOldSportsEvents.js"
+    "sports:clear-old": "node src/seed/clearOldSportsEvents.js",
+    "jili:seed-games": "node src/seed/seedJiliGames.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
