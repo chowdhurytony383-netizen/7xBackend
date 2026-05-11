@@ -3,19 +3,21 @@ import { env } from '../config/env.js';
 import Game from '../models/Game.js';
 import { getJiliGameList } from '../services/jiliService.js';
 
-const CATEGORY_MAP = {
-  1: { category: 'slots', label: 'Slot' },
-  2: { category: 'poker', label: 'Poker' },
-  3: { category: 'casino', label: 'Lobby' },
+const CATEGORY_ID_MAP = {
+  1: { category: 'slots', label: 'Slots' },
+  2: { category: 'cards', label: 'Card / Poker' },
+  3: { category: 'arcade', label: 'Arcade / Lobby' },
   5: { category: 'fish', label: 'Fishing' },
-  8: { category: 'casino', label: 'Casino' },
+  8: { category: 'casino', label: 'Table / Casino' },
 };
 
 const FALLBACK_IMAGES = {
   slots: '/images/others/banner1.png',
   fish: '/images/others/banner2.png',
-  poker: '/images/others/banner3.png',
-  casino: '/images/others/banner4.png',
+  casino: '/images/others/banner3.png',
+  crash: '/images/others/banner4.png',
+  cards: '/images/others/banner5.png',
+  arcade: '/images/others/banner1.png',
 };
 
 function hasArg(name) {
@@ -52,9 +54,42 @@ function pickGameId(raw = {}) {
   return raw.GameId || raw.GameID || raw.gameId || raw.id || raw.game;
 }
 
-function pickCategoryInfo(raw = {}) {
+function pickTypeText(raw = {}) {
+  return String(
+    raw.Type
+    || raw.type
+    || raw.GameType
+    || raw.gameType
+    || raw.Category
+    || raw.category
+    || raw.GameCategoryName
+    || raw.gameCategoryName
+    || ''
+  ).trim();
+}
+
+function pickCategoryId(raw = {}) {
   const categoryId = Number(raw.GameCategoryId || raw.gameCategoryId || raw.categoryId || raw.gameCategory || 0);
-  return CATEGORY_MAP[categoryId] || { category: 'casino', label: 'JILI' };
+  return Number.isFinite(categoryId) ? categoryId : 0;
+}
+
+function pickCategoryInfo(raw = {}) {
+  const typeText = pickTypeText(raw).toLowerCase();
+
+  if (typeText.includes('fish')) return { category: 'fish', label: 'Fishing' };
+  if (typeText.includes('crash') || typeText.includes('mines') || typeText.includes('plinko') || typeText.includes('limbo')) {
+    return { category: 'crash', label: 'Crash' };
+  }
+  if (typeText.includes('card') || typeText.includes('poker') || typeText.includes('rummy') || typeText.includes('teenpatti') || typeText.includes('andar')) {
+    return { category: 'cards', label: 'Card / Poker' };
+  }
+  if (typeText.includes('slot')) return { category: 'slots', label: 'Slots' };
+  if (typeText.includes('arcade') || typeText.includes('lobby')) return { category: 'arcade', label: 'Arcade / Lobby' };
+  if (typeText.includes('casino') || typeText.includes('table') || typeText.includes('bingo') || typeText.includes('roulette') || typeText.includes('baccarat') || typeText.includes('sic bo') || typeText.includes('keno')) {
+    return { category: 'casino', label: 'Table / Casino' };
+  }
+
+  return CATEGORY_ID_MAP[pickCategoryId(raw)] || { category: 'casino', label: 'Table / Casino' };
 }
 
 function pickSorting(raw = {}, index = 0) {
@@ -87,6 +122,7 @@ function normalizeProviderGame(raw = {}, index = 0) {
     gameCode,
     category: categoryInfo.category,
     categoryLabel: categoryInfo.label,
+    typeText: pickTypeText(raw),
     sortOrder: pickSorting(raw, index),
     jp: toBool(raw.JP ?? raw.jp),
     freeSpin: toBool(raw.Freespin ?? raw.FreeSpin ?? raw.freespin),
@@ -117,7 +153,13 @@ async function run() {
   }
 
   const finalGames = limit > 0 ? uniqueGames.slice(0, limit) : uniqueGames;
+  const categoryCounts = finalGames.reduce((acc, game) => {
+    acc[game.category] = (acc[game.category] || 0) + 1;
+    return acc;
+  }, {});
+
   console.log(`Provider returned ${providerGames.length} rows. Valid unique games: ${uniqueGames.length}. Seeding: ${finalGames.length}.`);
+  console.log('Category counts:', categoryCounts);
 
   if (!finalGames.length) {
     throw new Error('No JILI games returned from provider. Check JILI_API_BASE_URL, JILI_AGENT_ID, JILI_AGENT_KEY and IP whitelist.');
@@ -143,6 +185,7 @@ async function run() {
         gameId: game.gameId,
         currency: env.JILI_CURRENCY || 'BDT',
         categoryLabel: game.categoryLabel,
+        typeText: game.typeText,
         jp: game.jp,
         freeSpin: game.freeSpin,
         providerGame: game.raw,
@@ -160,7 +203,7 @@ async function run() {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    console.log(`Upserted ${payload.displayName} (${game.gameCode})`);
+    console.log(`Upserted ${payload.displayName} (${game.gameCode}, ${game.category})`);
   }
 
   if (!dryRun && deactivateStale) {
@@ -173,7 +216,7 @@ async function run() {
   }
 
   await mongoose.disconnect();
-  console.log(dryRun ? 'Dry run complete. No database changes made.' : 'Done. JILI games seeded.');
+  console.log(dryRun ? 'Dry run complete. No database changes made.' : 'Done. JILI games seeded with categories.');
 }
 
 run().catch(async (error) => {
