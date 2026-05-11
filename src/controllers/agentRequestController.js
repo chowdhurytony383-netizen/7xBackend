@@ -8,6 +8,7 @@ import { AppError } from '../utils/appError.js';
 import { creditWallet, debitWallet } from '../utils/wallet.js';
 import { optionalString } from '../utils/validation.js';
 import { recordAgentCommissionForRequest } from '../services/agentCommissionService.js';
+import { safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
 
 function normalizeType(type) {
   const value = String(type || '').toUpperCase();
@@ -95,10 +96,12 @@ export const confirmAgentRequest = asyncHandler(async (req, res) => {
       type: 'DEPOSIT',
     });
 
+    const bonusResult = await safelyAwardFirstDepositBonus(transaction);
+
     return res.json({
       success: true,
-      message: 'Deposit confirmed. User wallet credited, agent balance deducted, and agent commission added.',
-      data: { request, transaction, agent: commissionAgent || updatedAgent, user: updatedUser },
+      message: 'Deposit confirmed. User wallet credited, agent balance deducted, agent commission added, and first deposit bonus checked.',
+      data: { request, transaction, agent: commissionAgent || updatedAgent, user: bonusResult?.user || updatedUser, bonus: bonusResult },
     });
   }
 

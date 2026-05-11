@@ -11,6 +11,7 @@ import { assertOrThrow } from '../utils/appError.js';
 import { optionalString, requireNumber, requireString } from '../utils/validation.js';
 import { creditWallet } from '../utils/wallet.js';
 import { sanitizeUser } from '../utils/sanitize.js';
+import { safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
 
 
 function boolFromBody(value, fallback = true) {
@@ -282,8 +283,11 @@ async function updateTransactionStatus(req, res, expectedType) {
   transaction.processedBy = req.user._id;
   await transaction.save();
 
+  let bonusResult = null;
+
   if (expectedType === 'DEPOSIT' && status === 'SUCCESS' && prevStatus !== 'SUCCESS') {
     await creditWallet(transaction.user, transaction.amount, 'admin-deposit-approval');
+    bonusResult = await safelyAwardFirstDepositBonus(transaction);
   }
 
   if (expectedType === 'WITHDRAW' && ['REJECTED', 'FAILED', 'CANCELLED'].includes(status) && !['REJECTED', 'FAILED', 'CANCELLED'].includes(prevStatus)) {
@@ -297,7 +301,7 @@ async function updateTransactionStatus(req, res, expectedType) {
     }
   }
 
-  res.json({ success: true, message: 'Transaction status updated', data: transaction });
+  res.json({ success: true, message: 'Transaction status updated', data: transaction, bonus: bonusResult });
 }
 
 export const updateDepositStatus = asyncHandler((req, res) => updateTransactionStatus(req, res, 'DEPOSIT'));

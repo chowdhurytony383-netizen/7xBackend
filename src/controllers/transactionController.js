@@ -13,6 +13,7 @@ import { env } from '../config/env.js';
 import { groupDepositMethodsByTitle, pickPrimaryDepositMethod } from '../utils/paymentMethodCanonical.js';
 import { assertUserCanDeposit, assertUserCanWithdraw } from '../utils/userPermissions.js';
 import { assertWithdrawalAllowedForUser } from '../services/withdrawalGuardService.js';
+import { getFirstDepositBonusSummary, safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
 
 function razorpayClient() {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) return null;
@@ -20,8 +21,11 @@ function razorpayClient() {
 }
 
 export const getMyTransactions = asyncHandler(async (req, res) => {
-  const transactions = await Transaction.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(150);
-  res.json({ success: true, data: transactions, transactions });
+  const [transactions, bonusSummary] = await Promise.all([
+    Transaction.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(150),
+    getFirstDepositBonusSummary(req.user._id),
+  ]);
+  res.json({ success: true, data: transactions, transactions, bonusSummary });
 });
 
 export const createWithdrawTransaction = asyncHandler(async (req, res) => {
@@ -110,8 +114,9 @@ export const verifyDepositPayment = asyncHandler(async (req, res) => {
   transaction.processedAt = new Date();
   await transaction.save();
   await creditWallet(req.user._id, transaction.amount, 'deposit-success');
+  const bonusResult = await safelyAwardFirstDepositBonus(transaction);
 
-  res.json({ success: true, message: 'Deposit verified', data: transaction });
+  res.json({ success: true, message: 'Deposit verified', data: transaction, bonus: bonusResult });
 });
 
 async function getGlobalDepositMethods(activeOnly = true) {
