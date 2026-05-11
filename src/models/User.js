@@ -87,14 +87,6 @@ const userSchema = new mongoose.Schema({
 
   wallet: { type: Number, default: 0, min: 0 },
 
-  // First deposit welcome bonus tracking. Bonus money is credited into wallet,
-  // while turnover/transaction records keep it identifiable as bonus balance.
-  firstDepositBonusAwarded: { type: Boolean, default: false, index: true },
-  firstDepositBonusAwardedAt: Date,
-  firstDepositBonusAmount: { type: Number, default: 0, min: 0 },
-  firstDepositBonusCurrency: { type: String, trim: true, uppercase: true, default: '' },
-  firstDepositBonusSourceTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
-
   // Main Admin account controls.
   // false = user cannot use that feature, true/undefined = allowed.
   gameplayEnabled: { type: Boolean, default: true },
@@ -128,6 +120,10 @@ const userSchema = new mongoose.Schema({
   tokenVersion: { type: Number, default: 0 },
   emailVerificationToken: { type: String, default: '' },
   emailVerificationExpires: Date,
+  emailVerificationOtpHash: { type: String, default: '' },
+  emailVerificationOtpExpiresAt: Date,
+  emailVerificationOtpAttempts: { type: Number, default: 0 },
+  emailVerificationOtpLastSentAt: Date,
   passwordResetOtpHash: { type: String, default: '' },
   passwordResetExpires: Date,
   passwordResetVerified: { type: Boolean, default: false },
@@ -170,6 +166,7 @@ userSchema.methods.toSafeObject = function toSafeObject() {
   delete raw.passwordResetOtpHash;
   delete raw.passwordResetVerified;
   delete raw.emailVerificationToken;
+  delete raw.emailVerificationOtpHash;
   delete raw.__v;
   return raw;
 };
