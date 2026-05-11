@@ -49,11 +49,23 @@ function formatBalance(userOrBalance) {
   return money(userOrBalance?.wallet || 0);
 }
 
-function getTxId(doc) {
-  return String(doc?._id || Date.now());
+function generateJiliTxId() {
+  // JILI examples use bigint-style numeric txId.
+  // A Mongo ObjectId string can be rejected by some game clients, so keep it numeric.
+  const suffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `${Date.now()}${suffix}`;
 }
 
-function buildDuplicateResponse(existing, message = 'already accepted', errorCode = 1) {
+function responseTxId(value) {
+  const text = String(value || '');
+  if (/^\d+$/.test(text)) {
+    const number = Number(text);
+    if (Number.isSafeInteger(number)) return number;
+  }
+  return text;
+}
+
+function buildDuplicateResponse(existing, message = 'already accepted', errorCode = 0) {
   const response = existing?.response || {};
   return {
     errorCode,
@@ -61,7 +73,7 @@ function buildDuplicateResponse(existing, message = 'already accepted', errorCod
     username: response?.username || existing?.username || '',
     currency: response?.currency || existing?.currency || env.JILI_CURRENCY || 'BDT',
     balance: money(response?.balance ?? existing?.balanceAfter ?? 0),
-    txId: response?.txId || existing?.txId,
+    txId: responseTxId(response?.txId || existing?.txId),
     token: response?.token || existing?.token || undefined,
   };
 }
@@ -186,7 +198,7 @@ export const acceptJiliBet = asyncHandler(async (req, res) => {
   });
 
   if (duplicate) {
-    return res.json(buildDuplicateResponse(duplicate, 'already accepted', 1));
+    return res.json(buildDuplicateResponse(duplicate, 'already accepted', 0));
   }
 
   const identity = await findUserByTokenOrUserId({ token, userId: body.userId });
@@ -244,14 +256,14 @@ export const acceptJiliBet = asyncHandler(async (req, res) => {
         status: 'accepted',
         errorCode: 0,
         message: 'success',
-        txId: new mongoose.Types.ObjectId().toString(),
+        txId: generateJiliTxId(),
       });
 
       response = jiliSuccess({
         username: identity.username,
         currency: identity.currency,
         balance: currentUser.wallet,
-        txId: tx.txId,
+        txId: responseTxId(tx.txId),
         token,
       });
 
@@ -291,7 +303,7 @@ export const cancelJiliBet = asyncHandler(async (req, res) => {
       { action: 'cancelBet', reqId },
     ],
   });
-  if (alreadyCancelled) return res.json(buildDuplicateResponse(alreadyCancelled, 'already canceled', 1));
+  if (alreadyCancelled) return res.json(buildDuplicateResponse(alreadyCancelled, 'already canceled', 0));
 
   const original = await JiliTransaction.findOne({ action: 'bet', round, status: 'accepted' });
   if (!original) return res.json(jiliError(2, 'Round not found'));
@@ -349,10 +361,10 @@ export const cancelJiliBet = asyncHandler(async (req, res) => {
         status: 'cancelled',
         errorCode: 0,
         message: 'success',
-        txId: new mongoose.Types.ObjectId().toString(),
+        txId: generateJiliTxId(),
       });
 
-      response = jiliSuccess({ username, currency: playerCurrency, balance: currentUser.wallet, txId: tx.txId });
+      response = jiliSuccess({ username, currency: playerCurrency, balance: currentUser.wallet, txId: responseTxId(tx.txId) });
       tx.response = response;
       await tx.save({ session });
     });
@@ -387,7 +399,7 @@ export const acceptJiliSessionBet = asyncHandler(async (req, res) => {
       { action: 'sessionBet', reqId },
     ],
   });
-  if (duplicate) return res.json(buildDuplicateResponse(duplicate, 'already accepted', 1));
+  if (duplicate) return res.json(buildDuplicateResponse(duplicate, 'already accepted', 0));
 
   const identity = await findUserByTokenOrUserId({ token, userId: body.userId });
   if (!identity) return res.json(jiliError(4, 'Token expired'));
@@ -452,14 +464,14 @@ export const acceptJiliSessionBet = asyncHandler(async (req, res) => {
         status: 'accepted',
         errorCode: 0,
         message: 'success',
-        txId: new mongoose.Types.ObjectId().toString(),
+        txId: generateJiliTxId(),
       });
 
       response = jiliSuccess({
         username: identity.username,
         currency: identity.currency,
         balance: currentUser.wallet,
-        txId: tx.txId,
+        txId: responseTxId(tx.txId),
         token,
       });
       tx.response = response;
@@ -500,7 +512,7 @@ export const cancelJiliSessionBet = asyncHandler(async (req, res) => {
       { action: 'cancelSessionBet', reqId },
     ],
   });
-  if (alreadyCancelled) return res.json(buildDuplicateResponse(alreadyCancelled, 'already canceled', 1));
+  if (alreadyCancelled) return res.json(buildDuplicateResponse(alreadyCancelled, 'already canceled', 0));
 
   const original = await JiliTransaction.findOne({ action: 'sessionBet', round, status: 'accepted' });
   if (!original) return res.json(jiliError(2, 'Round not found'));
@@ -549,10 +561,10 @@ export const cancelJiliSessionBet = asyncHandler(async (req, res) => {
         status: 'cancelled',
         errorCode: 0,
         message: 'success',
-        txId: new mongoose.Types.ObjectId().toString(),
+        txId: generateJiliTxId(),
       });
 
-      response = jiliSuccess({ username, currency: playerCurrency, balance: currentUser.wallet, txId: tx.txId });
+      response = jiliSuccess({ username, currency: playerCurrency, balance: currentUser.wallet, txId: responseTxId(tx.txId) });
       tx.response = response;
       await tx.save({ session });
     });
