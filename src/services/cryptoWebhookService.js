@@ -6,6 +6,7 @@ import User from '../models/User.js';
 import { env } from '../config/env.js';
 import { AppError, assertOrThrow } from '../utils/appError.js';
 import { creditWallet } from '../utils/wallet.js';
+import { safelyAwardFirstDepositBonus } from './firstDepositBonusService.js';
 import { convertCryptoToFiat } from './cryptoPriceService.js';
 import { maybeAutoSweepAfterCredit } from './cryptoAutoSweepService.js';
 
@@ -376,6 +377,8 @@ export async function processCryptoWebhookPayload(payload) {
       deposit.creditError = '';
       await deposit.save();
 
+      const bonusResult = await safelyAwardFirstDepositBonus(tx);
+
       let autoSweep = { status: 'not_attempted' };
       try {
         autoSweep = await maybeAutoSweepAfterCredit(deposit);
@@ -388,10 +391,11 @@ export async function processCryptoWebhookPayload(payload) {
         txHash: event.txHash,
         status: 'credited',
         userId: user.userId,
-        wallet: updatedUser.wallet,
+        wallet: bonusResult?.user?.wallet || updatedUser.wallet,
         amountCrypto: event.amountCrypto,
         amountFiat: conversion.amountFiat,
         fiatCurrency,
+        bonus: bonusResult,
         autoSweep,
       });
     } catch (error) {
