@@ -45,6 +45,14 @@ function generateEmailOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+function normalizeOtpValue(value) {
+  return String(value ?? '')
+    .replace(/[\u09E6-\u09EF]/g, (digit) => String(digit.charCodeAt(0) - 0x09E6))
+    .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06F0))
+    .replace(/\D/g, '');
+}
+
 function getOtpExpiryDate() {
   const minutes = Number.isFinite(env.EMAIL_OTP_EXPIRES_MINUTES) && env.EMAIL_OTP_EXPIRES_MINUTES > 0
     ? env.EMAIL_OTP_EXPIRES_MINUTES
@@ -331,7 +339,8 @@ export const sendEmailOtp = asyncHandler(async (req, res) => {
 });
 
 export const verifyEmailOtp = asyncHandler(async (req, res) => {
-  const otp = requireString(req.body.otp, 'OTP', 6, 6);
+  const otp = normalizeOtpValue(req.body.otp ?? req.body.code ?? req.body.emailOtp);
+  assertOrThrow(/^\d{6}$/.test(otp), 'Enter the 6 digit OTP', 400);
 
   assertOrThrow(!req.user.isVerified, 'Email already verified', 400);
   assertOrThrow(req.user.emailVerificationOtpHash, 'Please request an OTP first', 400);
