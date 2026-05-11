@@ -80,17 +80,6 @@ export const env = {
   CRYPTO_AUTO_SWEEP_ON_CREDIT: String(process.env.CRYPTO_AUTO_SWEEP_ON_CREDIT || 'false').toLowerCase() === 'true',
   CRYPTO_AUTO_SWEEP_COINS: process.env.CRYPTO_AUTO_SWEEP_COINS || 'BNB',
 
-  // First deposit bonus rules.
-  // The bonus is 100% of the first successful deposit, capped at BDT 15,000 or the user's local-currency equivalent.
-  FIRST_DEPOSIT_BONUS_ENABLED: String(process.env.FIRST_DEPOSIT_BONUS_ENABLED || 'true').toLowerCase() === 'true',
-  FIRST_DEPOSIT_BONUS_BASE_CAP_BDT: Number(process.env.FIRST_DEPOSIT_BONUS_BASE_CAP_BDT || 15000),
-  FIRST_DEPOSIT_BONUS_USE_LIVE_RATES: String(process.env.FIRST_DEPOSIT_BONUS_USE_LIVE_RATES || 'true').toLowerCase() === 'true',
-  FIRST_DEPOSIT_BONUS_EXCHANGE_API_URL: process.env.FIRST_DEPOSIT_BONUS_EXCHANGE_API_URL || 'https://open.er-api.com/v6/latest/BDT',
-  FIRST_DEPOSIT_BONUS_RATE_CACHE_MS: Number(process.env.FIRST_DEPOSIT_BONUS_RATE_CACHE_MS || 6 * 60 * 60 * 1000),
-  // Optional JSON override. Example: {"USD":0.0082,"INR":0.68,"XAF":5.0}
-  FIRST_DEPOSIT_BONUS_BDT_RATES_JSON: process.env.FIRST_DEPOSIT_BONUS_BDT_RATES_JSON || '',
-  // Optional direct cap override by currency. Example: {"USD":123,"BDT":15000}
-  FIRST_DEPOSIT_BONUS_CAPS_JSON: process.env.FIRST_DEPOSIT_BONUS_CAPS_JSON || '',
 
   // Agent commission rules.
   // Percentage in the agent's own currency. Example: BDT 100 -> BDT 6, USD 1 -> USD 0.06.
@@ -134,6 +123,25 @@ export const env = {
   SPORTS_AUTO_SETTLEMENT_ENABLED: String(process.env.SPORTS_AUTO_SETTLEMENT_ENABLED || 'true').toLowerCase() === 'true',
   SPORTS_AUTO_SETTLEMENT_MIN_DELAY_MINUTES: Number(process.env.SPORTS_AUTO_SETTLEMENT_MIN_DELAY_MINUTES || 15),
   SPORTS_AUTO_REVIEW_ABOVE_AMOUNT: Number(process.env.SPORTS_AUTO_REVIEW_ABOVE_AMOUNT || 0),
+
+
+
+  // JILI Seamless Wallet integration.
+  JILI_ENV: process.env.JILI_ENV || 'uat',
+  JILI_ENABLED: String(process.env.JILI_ENABLED || 'true').toLowerCase() === 'true',
+  JILI_AGENT_ID: process.env.JILI_AGENT_ID || '',
+  JILI_AGENT_KEY: process.env.JILI_AGENT_KEY || '',
+  JILI_API_BASE_URL: process.env.JILI_API_BASE_URL || '',
+  JILI_CURRENCY: (process.env.JILI_CURRENCY || 'BDT').toUpperCase(),
+  JILI_FORCE_BIND_CURRENCY: String(process.env.JILI_FORCE_BIND_CURRENCY || 'true').toLowerCase() === 'true',
+  JILI_USERNAME_PREFIX: process.env.JILI_USERNAME_PREFIX || '7xbet_',
+  JILI_CALLBACK_ROOT: process.env.JILI_CALLBACK_ROOT || '',
+  JILI_HOME_URL: process.env.JILI_HOME_URL || process.env.FRONTEND_URL || 'https://7xbet.asia',
+  JILI_DEFAULT_LANG: process.env.JILI_DEFAULT_LANG || 'en-US',
+  JILI_TOKEN_TTL_MINUTES: Number(process.env.JILI_TOKEN_TTL_MINUTES || 60),
+  JILI_DISABLE_FULLSCREEN: String(process.env.JILI_DISABLE_FULLSCREEN || 'false').toLowerCase() === 'true',
+  JILI_BASIC_AUTH_USER: process.env.JILI_BASIC_AUTH_USER || '',
+  JILI_BASIC_AUTH_PASS: process.env.JILI_BASIC_AUTH_PASS || '',
 
   // Kept only for old direct_test compatibility. Do not use in production.
   TATUM_BSC_MNEMONIC: process.env.TATUM_BSC_MNEMONIC || '',
