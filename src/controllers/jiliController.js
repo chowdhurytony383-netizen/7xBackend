@@ -12,6 +12,7 @@ import {
   jiliSuccess,
   normalizeCurrency,
   buildJiliUsername,
+  getJiliPlayerCurrency,
 } from '../services/jiliService.js';
 import { env } from '../config/env.js';
 
@@ -42,6 +43,16 @@ function parseGameId(value) {
 
 function getClientIp(req) {
   return String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+}
+
+function stripJiliUsernameToUserId(username = '') {
+  const raw = String(username || '').trim();
+  const prefix = String(env.JILI_USERNAME_PREFIX || '7xbet_').replace(/[^a-zA-Z0-9_]/g, '');
+  let value = prefix && raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
+
+  // Supports the new multi-currency username format: 7xbet_inr_USERID, 7xbet_usd_USERID, etc.
+  value = value.replace(/^[a-zA-Z]{3,5}_/, '');
+  return value;
 }
 
 function formatBalance(userOrBalance) {
@@ -91,8 +102,7 @@ async function findUserByTokenOrUserId({ token, userId }) {
 
   if (userId) {
     const username = String(userId).trim();
-    const prefix = String(env.JILI_USERNAME_PREFIX || '7xbet_').replace(/[^a-zA-Z0-9_]/g, '');
-    const possibleUserId = prefix && username.startsWith(prefix) ? username.slice(prefix.length) : username;
+    const possibleUserId = stripJiliUsernameToUserId(username);
 
     const user = await User.findOne({
       status: 'active',
@@ -104,13 +114,19 @@ async function findUserByTokenOrUserId({ token, userId }) {
       ],
     });
 
-    if (user && buildJiliUsername(user) === username) {
-      return {
-        user,
-        username,
-        currency: normalizeCurrency(env.JILI_CURRENCY || user.currency || 'BDT'),
-        tokenRecord: null,
-      };
+    if (user) {
+      const playerCurrency = getJiliPlayerCurrency(user);
+      const expectedNewUsername = buildJiliUsername(user, playerCurrency);
+      const expectedLegacyUsername = `${String(env.JILI_USERNAME_PREFIX || '7xbet_').replace(/[^a-zA-Z0-9_]/g, '')}${String(user.userId || user.username || user._id || '').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 42)}`.slice(0, 50);
+
+      if (expectedNewUsername === username || expectedLegacyUsername === username || possibleUserId === user.userId || possibleUserId === user.username) {
+        return {
+          user,
+          username,
+          currency: playerCurrency,
+          tokenRecord: null,
+        };
+      }
     }
   }
 
