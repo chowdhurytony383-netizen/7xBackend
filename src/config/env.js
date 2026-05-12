@@ -64,6 +64,30 @@ export const env = {
   CRYPTO_PRICE_CACHE_MS: Number(process.env.CRYPTO_PRICE_CACHE_MS || 60000),
   CRYPTO_DEFAULT_FIAT: process.env.CRYPTO_DEFAULT_FIAT || 'BDT',
 
+  // Crypto withdrawal rules/options.
+  // These fields are used by /api/crypto/withdraw-options and /api/crypto/withdrawals.
+  CRYPTO_WITHDRAW_ENABLED: String(process.env.CRYPTO_WITHDRAW_ENABLED || 'false').toLowerCase() === 'true',
+  CRYPTO_WITHDRAW_ALLOWED_METHODS: process.env.CRYPTO_WITHDRAW_ALLOWED_METHODS || '',
+  CRYPTO_WITHDRAW_FIAT: process.env.CRYPTO_WITHDRAW_FIAT || process.env.CRYPTO_DEFAULT_FIAT || 'BDT',
+  CRYPTO_WITHDRAW_MIN_FIAT: Number(process.env.CRYPTO_WITHDRAW_MIN_FIAT || 5),
+  CRYPTO_WITHDRAW_MAX_FIAT: Number(process.env.CRYPTO_WITHDRAW_MAX_FIAT || 300),
+  CRYPTO_WITHDRAW_DRY_RUN: String(process.env.CRYPTO_WITHDRAW_DRY_RUN || 'true').toLowerCase() === 'true',
+
+  CRYPTO_WITHDRAW_BSC_SIGNATURE_ID: process.env.CRYPTO_WITHDRAW_BSC_SIGNATURE_ID || process.env.TATUM_BSC_SIGNATURE_ID || '',
+  CRYPTO_WITHDRAW_BSC_INDEX: Number(process.env.CRYPTO_WITHDRAW_BSC_INDEX || 0),
+  CRYPTO_WITHDRAW_BSC_PRIVATE_KEY: process.env.CRYPTO_WITHDRAW_BSC_PRIVATE_KEY || '',
+  CRYPTO_WITHDRAW_BSC_GAS_LIMIT: process.env.CRYPTO_WITHDRAW_BSC_GAS_LIMIT || process.env.CRYPTO_SWEEP_BNB_GAS_LIMIT || '30000',
+  CRYPTO_WITHDRAW_BSC_GAS_PRICE: process.env.CRYPTO_WITHDRAW_BSC_GAS_PRICE || process.env.CRYPTO_SWEEP_BNB_GAS_PRICE || '',
+
+  CRYPTO_WITHDRAW_ETH_SIGNATURE_ID: process.env.CRYPTO_WITHDRAW_ETH_SIGNATURE_ID || '',
+  CRYPTO_WITHDRAW_ETH_INDEX: Number(process.env.CRYPTO_WITHDRAW_ETH_INDEX || 0),
+  CRYPTO_WITHDRAW_ETH_PRIVATE_KEY: process.env.CRYPTO_WITHDRAW_ETH_PRIVATE_KEY || '',
+
+  CRYPTO_WITHDRAW_TRON_SIGNATURE_ID: process.env.CRYPTO_WITHDRAW_TRON_SIGNATURE_ID || '',
+  CRYPTO_WITHDRAW_TRON_INDEX: Number(process.env.CRYPTO_WITHDRAW_TRON_INDEX || 0),
+  CRYPTO_WITHDRAW_TRON_PRIVATE_KEY: process.env.CRYPTO_WITHDRAW_TRON_PRIVATE_KEY || '',
+  CRYPTO_WITHDRAW_TRON_FEE_LIMIT: Number(process.env.CRYPTO_WITHDRAW_TRON_FEE_LIMIT || 100),
+
   COMPANY_BTC_ADDRESS: process.env.COMPANY_BTC_ADDRESS || '',
   COMPANY_ETH_ADDRESS: process.env.COMPANY_ETH_ADDRESS || '',
   COMPANY_TRON_ADDRESS: process.env.COMPANY_TRON_ADDRESS || '',
@@ -97,15 +121,14 @@ export const env = {
   WITHDRAW_KYC_REQUIRED: String(process.env.WITHDRAW_KYC_REQUIRED || 'true').toLowerCase() === 'true',
   // true = every deposit/bonus must be wagered before the user can withdraw that balance.
   WITHDRAW_TURNOVER_REQUIRED: String(process.env.WITHDRAW_TURNOVER_REQUIRED || 'true').toLowerCase() === 'true',
-  // Legacy fallback for older turnover logic.
+  // 1 = deposit 100 requires 100 total bets before withdraw; 2 = deposit 100 requires 200 bets.
   WITHDRAW_TURNOVER_MULTIPLIER: Number(process.env.WITHDRAW_TURNOVER_MULTIPLIER || 1),
-  // New separate rules:
-  // Deposit 100 requires 50 total bets before withdraw by default.
+
+  // Optional split turnover rules: deposit and bonus can have different multipliers.
+  // Example: deposit 1000 => turnover 500 when WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER=0.5.
   WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER: process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER),
-  DEPOSIT_TURNOVER_MULTIPLIER: process.env.DEPOSIT_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.DEPOSIT_TURNOVER_MULTIPLIER),
-  // Bonus 100 requires 100 total bets before withdraw by default.
+  // Example: bonus 1000 => bonus turnover 1000 when WITHDRAW_BONUS_TURNOVER_MULTIPLIER=1.
   WITHDRAW_BONUS_TURNOVER_MULTIPLIER: process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER),
-  BONUS_TURNOVER_MULTIPLIER: process.env.BONUS_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.BONUS_TURNOVER_MULTIPLIER),
 
   // Free/low-cost automatic sports betting system.
   // Requires a free odds API key such as The Odds API.
@@ -141,6 +164,11 @@ export const env = {
   JILI_API_BASE_URL: process.env.JILI_API_BASE_URL || '',
   JILI_CURRENCY: (process.env.JILI_CURRENCY || 'BDT').toUpperCase(),
   JILI_FORCE_BIND_CURRENCY: String(process.env.JILI_FORCE_BIND_CURRENCY || 'true').toLowerCase() === 'true',
+
+  // Comma-separated list of currencies enabled by JILI for this AgentId.
+  // Unsupported user currencies will safely fall back before sending /auth to JILI.
+  JILI_SUPPORTED_CURRENCIES: process.env.JILI_SUPPORTED_CURRENCIES || '',
+  JILI_UNSUPPORTED_CURRENCY_FALLBACK: (process.env.JILI_UNSUPPORTED_CURRENCY_FALLBACK || 'USD').toUpperCase(),
   JILI_USERNAME_PREFIX: process.env.JILI_USERNAME_PREFIX || '7xbet_',
   JILI_CALLBACK_ROOT: process.env.JILI_CALLBACK_ROOT || '',
   JILI_HOME_URL: process.env.JILI_HOME_URL || process.env.FRONTEND_URL || 'https://7xbet.asia',
