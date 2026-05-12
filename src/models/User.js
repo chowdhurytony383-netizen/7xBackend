@@ -87,6 +87,16 @@ const userSchema = new mongoose.Schema({
 
   wallet: { type: Number, default: 0, min: 0 },
 
+  // First deposit bonus state. Kept on the user document so a rejected/cancelled
+  // first-deposit bonus cannot be claimed again later.
+  firstDepositBonusAwarded: { type: Boolean, default: false, index: true },
+  firstDepositBonusAwardedAt: Date,
+  firstDepositBonusAmount: { type: Number, default: 0, min: 0 },
+  firstDepositBonusCurrency: { type: String, trim: true, uppercase: true, default: '' },
+  firstDepositBonusSourceTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+  firstDepositBonusRejected: { type: Boolean, default: false, index: true },
+  firstDepositBonusRejectedAt: Date,
+
   // Main Admin account controls.
   // false = user cannot use that feature, true/undefined = allowed.
   gameplayEnabled: { type: Boolean, default: true },
