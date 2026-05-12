@@ -13,7 +13,7 @@ import { env } from '../config/env.js';
 import { groupDepositMethodsByTitle, pickPrimaryDepositMethod } from '../utils/paymentMethodCanonical.js';
 import { assertUserCanDeposit, assertUserCanWithdraw } from '../utils/userPermissions.js';
 import { assertWithdrawalAllowedForUser } from '../services/withdrawalGuardService.js';
-import { getFirstDepositBonusSummary, safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
+import { getFirstDepositBonusSummary, rejectFirstDepositBonusForUser, safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
 
 function razorpayClient() {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) return null;
@@ -57,6 +57,25 @@ export const createWithdrawTransaction = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({ success: true, message: 'Withdrawal request created', transactionId: transaction._id, data: transaction });
+});
+
+export const rejectMyFirstDepositBonus = asyncHandler(async (req, res) => {
+  const result = await rejectFirstDepositBonusForUser(req.user._id);
+
+  assertOrThrow(
+    result.rejected,
+    result.message || 'Active first deposit bonus was not found or cannot be rejected.',
+    result.reason === 'insufficient_wallet_to_remove_bonus' ? 400 : 404,
+    { code: 'FIRST_DEPOSIT_BONUS_REJECT_FAILED', reason: result.reason, wallet: result.wallet, requiredWallet: result.requiredWallet }
+  );
+
+  res.json({
+    success: true,
+    message: 'First deposit bonus rejected. Bonus turnover cancelled.',
+    data: result,
+    bonusSummary: result.summary,
+    user: result.user?.toSafeObject ? result.user.toSafeObject() : result.user,
+  });
 });
 
 export const createDepositOrder = asyncHandler(async (req, res) => {
