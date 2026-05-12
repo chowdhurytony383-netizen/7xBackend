@@ -134,6 +134,10 @@ export const env = {
   JILI_API_BASE_URL: process.env.JILI_API_BASE_URL || '',
   JILI_CURRENCY: (process.env.JILI_CURRENCY || 'BDT').toUpperCase(),
   JILI_FORCE_BIND_CURRENCY: String(process.env.JILI_FORCE_BIND_CURRENCY || 'true').toLowerCase() === 'true',
+  // Comma-separated list of currencies enabled by JILI for this AgentId.
+  // Unsupported user currencies will safely fall back before sending /auth to JILI.
+  JILI_SUPPORTED_CURRENCIES: process.env.JILI_SUPPORTED_CURRENCIES || '',
+  JILI_UNSUPPORTED_CURRENCY_FALLBACK: (process.env.JILI_UNSUPPORTED_CURRENCY_FALLBACK || 'USD').toUpperCase(),
   JILI_USERNAME_PREFIX: process.env.JILI_USERNAME_PREFIX || '7xbet_',
   JILI_CALLBACK_ROOT: process.env.JILI_CALLBACK_ROOT || '',
   JILI_HOME_URL: process.env.JILI_HOME_URL || process.env.FRONTEND_URL || 'https://7xbet.asia',
