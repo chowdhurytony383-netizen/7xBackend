@@ -3,7 +3,7 @@ import TurnoverRequirement from '../models/TurnoverRequirement.js';
 import User from '../models/User.js';
 import Verification from '../models/Verification.js';
 import { env } from '../config/env.js';
-import { creditWallet } from '../utils/wallet.js';
+import { creditWallet, debitWallet } from '../utils/wallet.js';
 
 const BONUS_CODE = 'FIRST_DEPOSIT_100';
 const BONUS_SOURCE = 'first-deposit-bonus';
@@ -211,10 +211,10 @@ export async function awardFirstDepositBonusForTransaction(depositTransaction) {
     user: transaction.user,
     type: 'BONUS',
     'gatewayPayload.bonusCode': BONUS_CODE,
-    status: 'SUCCESS',
-  }).select('_id amount');
+    status: { $in: ['SUCCESS', 'CANCELLED', 'REJECTED'] },
+  }).select('_id amount status');
   if (alreadyAwardedTransaction) {
-    return { awarded: false, reason: 'already_awarded', bonusTransaction: alreadyAwardedTransaction };
+    return { awarded: false, reason: 'already_awarded_or_rejected', bonusTransaction: alreadyAwardedTransaction };
   }
 
   const successfulDepositCount = await Transaction.countDocuments({
@@ -268,7 +268,7 @@ export async function awardFirstDepositBonusForTransaction(depositTransaction) {
       currency: cap.currency,
       balanceType: 'BONUS',
       processedAt: new Date(),
-      userNote: `First deposit 100% bonus credited. Turnover required: ${bonusAmount} ${cap.currency}.`,
+      userNote: `First deposit 100% bonus credited. Bonus turnover required: ${bonusAmount} ${cap.currency}.`,
       gatewayPayload: {
         source: BONUS_SOURCE,
         bonusCode: BONUS_CODE,
@@ -282,7 +282,7 @@ export async function awardFirstDepositBonusForTransaction(depositTransaction) {
         baseCapAmount: cap.baseCapAmount,
         rate: cap.rate,
         rateSource: cap.rateSource,
-        turnoverMultiplier: Number(env.WITHDRAW_TURNOVER_MULTIPLIER || 1),
+        turnoverMultiplier: Number(env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER || env.BONUS_TURNOVER_MULTIPLIER || 1),
       },
     });
 
@@ -341,6 +341,100 @@ export async function safelyAwardFirstDepositBonus(depositTransaction) {
   }
 }
 
+export async function rejectFirstDepositBonusForUser(userId) {
+  const bonusTransaction = await Transaction.findOne({
+    user: userId,
+    type: 'BONUS',
+    'gatewayPayload.bonusCode': BONUS_CODE,
+    status: 'SUCCESS',
+  }).sort({ createdAt: -1 });
+
+  if (!bonusTransaction) {
+    return { rejected: false, reason: 'active_bonus_not_found' };
+  }
+
+  const bonusAmount = money(bonusTransaction.amount);
+  if (bonusAmount <= 0) {
+    return { rejected: false, reason: 'empty_bonus_amount' };
+  }
+
+  const user = await User.findById(userId);
+  if (!user) return { rejected: false, reason: 'user_not_found' };
+
+  if (Number(user.wallet || 0) < bonusAmount) {
+    return {
+      rejected: false,
+      reason: 'insufficient_wallet_to_remove_bonus',
+      message: `You need at least ${bonusAmount} ${bonusTransaction.currency || user.currency || ''} in wallet to reject this bonus.`,
+      wallet: money(user.wallet),
+      requiredWallet: bonusAmount,
+    };
+  }
+
+  const updatedUser = await debitWallet(userId, bonusAmount, 'first-deposit-bonus-reject');
+
+  const cancelledTurnovers = await TurnoverRequirement.updateMany(
+    {
+      user: userId,
+      type: 'bonus',
+      status: 'open',
+      remaining: { $gt: 0 },
+      $or: [
+        { sourceRef: bonusTransaction._id },
+        { 'meta.bonusCode': BONUS_CODE },
+        { source: BONUS_SOURCE },
+      ],
+    },
+    {
+      $set: {
+        status: 'cancelled',
+        remaining: 0,
+        completedAt: new Date(),
+        'meta.cancelledReason': 'bonus_rejected_by_user',
+      },
+    }
+  );
+
+  bonusTransaction.status = 'CANCELLED';
+  bonusTransaction.processedAt = new Date();
+  bonusTransaction.userNote = 'First deposit bonus rejected by user. Bonus turnover cancelled.';
+  bonusTransaction.gatewayPayload = {
+    ...(bonusTransaction.gatewayPayload || {}),
+    rejectedByUser: true,
+    rejectedAt: new Date(),
+    cancelledTurnoverCount: cancelledTurnovers.modifiedCount || cancelledTurnovers.nModified || 0,
+  };
+  await bonusTransaction.save();
+
+  await User.updateOne(
+    { _id: userId },
+    {
+      $set: {
+        firstDepositBonusAwarded: true,
+        firstDepositBonusRejected: true,
+        firstDepositBonusRejectedAt: new Date(),
+        firstDepositBonusAmount: 0,
+        firstDepositBonusCurrency: bonusTransaction.currency || '',
+      },
+      $unset: {
+        firstDepositBonusAwardedAt: '',
+        firstDepositBonusSourceTransaction: '',
+      },
+    }
+  );
+
+  const summary = await getFirstDepositBonusSummary(userId);
+  return {
+    rejected: true,
+    amount: bonusAmount,
+    currency: bonusTransaction.currency,
+    transaction: bonusTransaction,
+    cancelledTurnoverCount: cancelledTurnovers.modifiedCount || cancelledTurnovers.nModified || 0,
+    user: updatedUser,
+    summary,
+  };
+}
+
 export async function getFirstDepositBonusSummary(userId) {
   const [bonusTransaction, openRequirements] = await Promise.all([
     Transaction.findOne({ user: userId, type: 'BONUS', 'gatewayPayload.bonusCode': BONUS_CODE })
@@ -356,17 +450,24 @@ export async function getFirstDepositBonusSummary(userId) {
   const remainingTurnover = money(openRequirements.reduce((sum, item) => sum + Number(item.remaining || 0), 0));
   const totalRequiredTurnover = money(openRequirements.reduce((sum, item) => sum + Number(item.requiredWager || 0), 0));
   const totalWagered = money(openRequirements.reduce((sum, item) => sum + Number(item.wagered || 0), 0));
+  const status = bonusTransaction?.status || 'NOT_AWARDED';
+  const awarded = status === 'SUCCESS';
+  const rejected = ['CANCELLED', 'REJECTED'].includes(status) || bonusTransaction?.gatewayPayload?.rejectedByUser === true;
+  const originalAmount = Number(bonusTransaction?.amount || 0);
 
   return {
     bonusCode: BONUS_CODE,
-    awarded: bonusTransaction?.status === 'SUCCESS',
-    amount: Number(bonusTransaction?.amount || 0),
-    status: bonusTransaction?.status || 'NOT_AWARDED',
+    awarded,
+    rejected,
+    canReject: awarded && originalAmount > 0,
+    amount: awarded ? originalAmount : 0,
+    originalAmount,
+    status,
     transactionId: bonusTransaction?._id || null,
-    remainingTurnover,
-    totalRequiredTurnover,
-    totalWagered,
-    withdrawUnlocked: Boolean(bonusTransaction) && remainingTurnover <= 0,
+    remainingTurnover: awarded ? remainingTurnover : 0,
+    totalRequiredTurnover: awarded ? totalRequiredTurnover : 0,
+    totalWagered: awarded ? totalWagered : 0,
+    withdrawUnlocked: awarded && remainingTurnover <= 0,
     createdAt: bonusTransaction?.createdAt || null,
     updatedAt: bonusTransaction?.updatedAt || null,
   };

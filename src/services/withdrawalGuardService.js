@@ -12,9 +12,26 @@ function boolEnv(value, fallback = true) {
   return String(value).trim().toLowerCase() === 'true';
 }
 
-function getTurnoverMultiplier() {
-  const multiplier = Number(env.WITHDRAW_TURNOVER_MULTIPLIER || 1);
-  return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+function getTurnoverMultiplierForType(type = '') {
+  const normalizedType = String(type || '').toLowerCase();
+
+  // New rule requested by admin:
+  // - Deposit balance: only half of the deposited amount is turnover-locked.
+  // - Bonus balance: the full bonus amount is turnover-locked.
+  if (normalizedType === 'deposit') {
+    return positiveNumber(env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER ?? env.DEPOSIT_TURNOVER_MULTIPLIER, 0.5);
+  }
+
+  if (normalizedType === 'bonus') {
+    return positiveNumber(env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER ?? env.BONUS_TURNOVER_MULTIPLIER, 1);
+  }
+
+  return positiveNumber(env.WITHDRAW_TURNOVER_MULTIPLIER, 1);
 }
 
 function hasText(value) {
@@ -74,7 +91,7 @@ export async function recordTurnoverCredit({ userId, amount, source = '', source
   if (!type || creditAmount <= 0) return null;
   if (!boolEnv(env.WITHDRAW_TURNOVER_REQUIRED, true)) return null;
 
-  const requiredWager = money(creditAmount * getTurnoverMultiplier());
+  const requiredWager = money(creditAmount * getTurnoverMultiplierForType(type));
   if (requiredWager <= 0) return null;
 
   return TurnoverRequirement.create({
