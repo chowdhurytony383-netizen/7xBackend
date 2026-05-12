@@ -55,13 +55,42 @@ export function normalizeCurrency(currency = '') {
   return value || env.JILI_CURRENCY || 'BDT';
 }
 
+export function getJiliSupportedCurrencies() {
+  return String(env.JILI_SUPPORTED_CURRENCIES || '')
+    .split(',')
+    .map((currency) => normalizeCurrency(currency))
+    .filter(Boolean);
+}
+
+export function getJiliFallbackCurrency() {
+  const supported = getJiliSupportedCurrencies();
+  const configuredFallback = normalizeCurrency(env.JILI_UNSUPPORTED_CURRENCY_FALLBACK || 'USD');
+
+  if (!supported.length || supported.includes(configuredFallback)) return configuredFallback;
+
+  const configuredDefault = normalizeCurrency(env.JILI_CURRENCY || 'BDT');
+  if (supported.includes(configuredDefault)) return configuredDefault;
+
+  return supported[0] || configuredFallback || 'USD';
+}
+
+export function resolveJiliCurrency(currency = '') {
+  const requested = normalizeCurrency(currency);
+  const supported = getJiliSupportedCurrencies();
+
+  // Backward compatible behavior: if no supported list is configured, send the requested currency.
+  if (!supported.length) return requested;
+
+  return supported.includes(requested) ? requested : getJiliFallbackCurrency();
+}
+
 export function getJiliPlayerCurrency(user = {}) {
-  if (env.JILI_FORCE_BIND_CURRENCY) return normalizeCurrency(env.JILI_CURRENCY);
+  if (env.JILI_FORCE_BIND_CURRENCY) return resolveJiliCurrency(env.JILI_CURRENCY);
 
   // IMPORTANT: when multi-currency is enabled, prefer the user's currency first.
-  // The previous implementation used env.JILI_CURRENCY before user.currency,
-  // which forced every player to BDT/Tk even when JILI_FORCE_BIND_CURRENCY=false.
-  return normalizeCurrency(
+  // If that currency is not enabled by JILI for this AgentId, safely fall back
+  // before creating the JILI token and /auth response.
+  return resolveJiliCurrency(
     user.currency
     || user.walletCurrency
     || user.preferredCurrency
