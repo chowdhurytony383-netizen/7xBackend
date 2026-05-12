@@ -97,8 +97,15 @@ export const env = {
   WITHDRAW_KYC_REQUIRED: String(process.env.WITHDRAW_KYC_REQUIRED || 'true').toLowerCase() === 'true',
   // true = every deposit/bonus must be wagered before the user can withdraw that balance.
   WITHDRAW_TURNOVER_REQUIRED: String(process.env.WITHDRAW_TURNOVER_REQUIRED || 'true').toLowerCase() === 'true',
-  // 1 = deposit 100 requires 100 total bets before withdraw; 2 = deposit 100 requires 200 bets.
+  // Legacy fallback for older turnover logic.
   WITHDRAW_TURNOVER_MULTIPLIER: Number(process.env.WITHDRAW_TURNOVER_MULTIPLIER || 1),
+  // New separate rules:
+  // Deposit 100 requires 50 total bets before withdraw by default.
+  WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER: process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER),
+  DEPOSIT_TURNOVER_MULTIPLIER: process.env.DEPOSIT_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.DEPOSIT_TURNOVER_MULTIPLIER),
+  // Bonus 100 requires 100 total bets before withdraw by default.
+  WITHDRAW_BONUS_TURNOVER_MULTIPLIER: process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER),
+  BONUS_TURNOVER_MULTIPLIER: process.env.BONUS_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.BONUS_TURNOVER_MULTIPLIER),
 
   // Free/low-cost automatic sports betting system.
   // Requires a free odds API key such as The Odds API.
@@ -134,10 +141,6 @@ export const env = {
   JILI_API_BASE_URL: process.env.JILI_API_BASE_URL || '',
   JILI_CURRENCY: (process.env.JILI_CURRENCY || 'BDT').toUpperCase(),
   JILI_FORCE_BIND_CURRENCY: String(process.env.JILI_FORCE_BIND_CURRENCY || 'true').toLowerCase() === 'true',
-  // Comma-separated list of currencies enabled by JILI for this AgentId.
-  // Unsupported user currencies will safely fall back before sending /auth to JILI.
-  JILI_SUPPORTED_CURRENCIES: process.env.JILI_SUPPORTED_CURRENCIES || '',
-  JILI_UNSUPPORTED_CURRENCY_FALLBACK: (process.env.JILI_UNSUPPORTED_CURRENCY_FALLBACK || 'USD').toUpperCase(),
   JILI_USERNAME_PREFIX: process.env.JILI_USERNAME_PREFIX || '7xbet_',
   JILI_CALLBACK_ROOT: process.env.JILI_CALLBACK_ROOT || '',
   JILI_HOME_URL: process.env.JILI_HOME_URL || process.env.FRONTEND_URL || 'https://7xbet.asia',
