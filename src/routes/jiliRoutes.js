@@ -44,7 +44,9 @@ function verifyBasicAuth(req, res, next) {
 // Frontend/operator launch APIs.
 router.post('/launch', protect, launchJiliGame);
 router.post('/launch/:gameId', protect, launchJiliGame);
-router.get('/games', protect, listJiliGames);
+// Public game list API: visitors can browse JILI games before login.
+// Launch/play routes remain protected so only logged-in users can open a game.
+router.get('/games', listJiliGames);
 
 // JILI operator callback APIs.
 router.post('/auth', verifyBasicAuth, authJiliPlayer);
