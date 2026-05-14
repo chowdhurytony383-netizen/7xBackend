@@ -13,7 +13,8 @@ import { env } from '../config/env.js';
 import { groupDepositMethodsByTitle, pickPrimaryDepositMethod } from '../utils/paymentMethodCanonical.js';
 import { assertUserCanDeposit, assertUserCanWithdraw } from '../utils/userPermissions.js';
 import { assertWithdrawalAllowedForUser } from '../services/withdrawalGuardService.js';
-import { getFirstDepositBonusSummary, rejectFirstDepositBonusForUser, safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
+import { rejectFirstDepositBonusForUser, safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
+import { getSignupBonusSummary } from '../services/signupBonusService.js';
 
 function razorpayClient() {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) return null;
@@ -21,11 +22,17 @@ function razorpayClient() {
 }
 
 export const getMyTransactions = asyncHandler(async (req, res) => {
-  const [transactions, bonusSummary] = await Promise.all([
+  const [transactions, signupBonusSummary] = await Promise.all([
     Transaction.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(150),
-    getFirstDepositBonusSummary(req.user._id),
+    getSignupBonusSummary(req.user._id),
   ]);
-  res.json({ success: true, data: transactions, transactions, bonusSummary });
+  res.json({
+    success: true,
+    data: transactions,
+    transactions,
+    bonusSummary: signupBonusSummary,
+    signupBonusSummary,
+  });
 });
 
 export const createWithdrawTransaction = asyncHandler(async (req, res) => {

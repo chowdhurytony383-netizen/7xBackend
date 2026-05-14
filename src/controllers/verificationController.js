@@ -1,106 +1,85 @@
 import Verification from '../models/Verification.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { assertOrThrow } from '../utils/appError.js';
-import { optionalString, requireEmail, requireString } from '../utils/validation.js';
-import { saveUploadedFile } from '../utils/cloudinary.js';
-
-async function saveVerificationDocument(req, file, label) {
-  if (!file) return '';
-  return saveUploadedFile(file, {
-    req,
-    localSubDir: 'verification',
-    cloudinaryFolder: '7xbet/verification',
-    publicIdPrefix: `${req.user?.userId || req.user?._id || 'user'}-${label}`,
-    resourceType: 'auto',
-  });
-}
+import { optionalString, requireEmail } from '../utils/validation.js';
 
 function optionalDate(value) {
   const raw = optionalString(value, 40);
   if (!raw) return undefined;
   const date = new Date(raw);
-  assertOrThrow(!Number.isNaN(date.getTime()), 'Invalid date of birth', 400);
-  return date;
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
 function extractPayload(req) {
-  return {
-    // Required for withdrawal unlock.
-    fullName: requireString(req.body.fullName, 'Full Name', 2, 160),
-    email: requireEmail(req.body.email),
-    address: requireString(req.body.address, 'Address', 2, 300),
-    documentType: optionalString(req.body.documentType, 40) || 'NID',
+  const emailInput = optionalString(req.body.email || req.user.email, 254) || req.user.email || '';
 
-    // Optional profile/KYC fields.
+  return {
+    // Document verification is disabled. These fields are only optional profile info.
+    fullName: optionalString(req.body.fullName || req.body.name || req.user.fullName || req.user.name, 160) || '',
+    email: emailInput ? requireEmail(emailInput) : '',
     phone: optionalString(req.body.phone, 40),
     dateOfBirth: optionalDate(req.body.dateOfBirth),
+    address: optionalString(req.body.address, 300),
     street: optionalString(req.body.street, 180),
     city: optionalString(req.body.city, 120),
     postCode: optionalString(req.body.postCode, 40),
-    documentNumber: optionalString(req.body.documentNumber, 80),
+    documentType: 'NONE',
+    documentNumber: '',
+    documentFront: '',
+    documentBack: '',
   };
 }
 
 export const getMyVerification = asyncHandler(async (req, res) => {
   const verification = await Verification.findOne({ user: req.user._id });
-  res.json({ success: true, data: verification || null, verification });
+  res.json({
+    success: true,
+    verificationRequired: false,
+    documentUploadRequired: false,
+    data: verification || null,
+    verification,
+  });
 });
 
 export const submitVerification = asyncHandler(async (req, res) => {
   const payload = extractPayload(req);
 
-  const existing = await Verification.findOne({ user: req.user._id });
-  assertOrThrow(!existing || existing.status === 'rejected', 'Verification already submitted', 409);
-
-  const documentFront = await saveVerificationDocument(req, req.files?.documentFront?.[0], 'document-front');
-  const documentBack = await saveVerificationDocument(req, req.files?.documentBack?.[0], 'document-back');
-  assertOrThrow(documentFront, 'Document front is required', 400);
-
   const verification = await Verification.findOneAndUpdate(
     { user: req.user._id },
-    { ...payload, user: req.user._id, documentFront, documentBack, status: 'pending', adminNote: '' },
+    {
+      ...payload,
+      user: req.user._id,
+      status: 'not_required',
+      adminNote: 'Document verification disabled by platform settings.',
+    },
     { upsert: true, new: true, runValidators: true }
   );
 
   Object.assign(req.user, {
-    fullName: payload.fullName,
-    name: payload.fullName,
-    phone: payload.phone,
+    fullName: payload.fullName || req.user.fullName,
+    name: payload.fullName || req.user.name,
+    phone: payload.phone ?? req.user.phone,
     ...(payload.dateOfBirth ? { dateOfBirth: payload.dateOfBirth } : {}),
-    address: payload.address,
-    street: payload.street,
-    city: payload.city,
-    postCode: payload.postCode,
-    verificationStatus: 'pending',
+    address: payload.address ?? req.user.address,
+    street: payload.street ?? req.user.street,
+    city: payload.city ?? req.user.city,
+    postCode: payload.postCode ?? req.user.postCode,
+    verificationStatus: 'not_required',
   });
+
+  if (payload.email && payload.email !== req.user.email) {
+    req.user.email = payload.email;
+    req.user.isVerified = false;
+  }
+
   await req.user.save();
 
-  res.status(201).json({ success: true, message: 'Verification submitted', data: verification });
-});
-
-export const updateVerification = asyncHandler(async (req, res) => {
-  const existing = await Verification.findOne({ user: req.user._id });
-  assertOrThrow(existing, 'Verification not found', 404);
-  assertOrThrow(existing.status !== 'approved', 'Approved verification cannot be edited', 409);
-  const payload = extractPayload(req);
-  const documentFront = await saveVerificationDocument(req, req.files?.documentFront?.[0], 'document-front') || existing.documentFront;
-  const documentBack = await saveVerificationDocument(req, req.files?.documentBack?.[0], 'document-back') || existing.documentBack;
-
-  Object.assign(existing, payload, { documentFront, documentBack, status: 'pending', adminNote: '' });
-  await existing.save();
-
-  Object.assign(req.user, {
-    fullName: payload.fullName,
-    name: payload.fullName,
-    phone: payload.phone,
-    ...(payload.dateOfBirth ? { dateOfBirth: payload.dateOfBirth } : {}),
-    address: payload.address,
-    street: payload.street,
-    city: payload.city,
-    postCode: payload.postCode,
-    verificationStatus: 'pending',
+  res.status(200).json({
+    success: true,
+    message: 'Profile information saved. Document verification is not required for withdrawal, deposit, or bonus.',
+    verificationRequired: false,
+    documentUploadRequired: false,
+    data: verification,
   });
-  await req.user.save();
-
-  res.json({ success: true, message: 'Verification updated', data: existing });
 });
+
+export const updateVerification = submitVerification;

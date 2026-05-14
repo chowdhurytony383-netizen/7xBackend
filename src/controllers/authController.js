@@ -12,6 +12,7 @@ import { createUniqueUserId, generatePassword } from '../utils/identity.js';
 import { currencyForResolvedCountry, resolveRegistrationCountry } from '../utils/requestCountry.js';
 import { saveUploadedFile } from '../utils/cloudinary.js';
 import { triggerCryptoAddressCreationForUser } from '../services/cryptoAddressService.js';
+import { safelyAwardSignupBonus } from '../services/signupBonusService.js';
 
 async function createAndSendVerification(user) {
   const token = randomToken(24);
@@ -122,13 +123,18 @@ export const register = asyncHandler(async (req, res) => {
   });
 
   triggerCryptoAddressCreationForUser(user);
-  await createAndSendVerification(user);
-  const tokens = setAuthCookies(res, user);
+  const signupBonus = await safelyAwardSignupBonus(user);
+  const latestUser = signupBonus.user || await User.findById(user._id);
+  await createAndSendVerification(latestUser);
+  const tokens = setAuthCookies(res, latestUser);
 
   res.status(201).json({
     success: true,
-    message: 'Account created. Check your inbox for verification.',
-    data: authData(user, tokens, { login: userId }),
+    message: signupBonus.awarded
+      ? `Account created. ${signupBonus.amount} ${signupBonus.currency} signup bonus credited. Check your inbox for email verification.`
+      : 'Account created. Check your inbox for email verification.',
+    data: authData(latestUser, tokens, { login: userId, signupBonus }),
+    signupBonus,
   });
 });
 
@@ -159,11 +165,16 @@ export const oneClickRegister = asyncHandler(async (req, res) => {
   });
 
   triggerCryptoAddressCreationForUser(user);
-  const tokens = setAuthCookies(res, user);
+  const signupBonus = await safelyAwardSignupBonus(user);
+  const latestUser = signupBonus.user || await User.findById(user._id);
+  const tokens = setAuthCookies(res, latestUser);
   res.status(201).json({
     success: true,
-    message: 'One click registration completed.',
-    data: authData(user, tokens, { login: userId, password }),
+    message: signupBonus.awarded
+      ? `One click registration completed. ${signupBonus.amount} ${signupBonus.currency} signup bonus credited.`
+      : 'One click registration completed.',
+    data: authData(latestUser, tokens, { login: userId, password, signupBonus }),
+    signupBonus,
   });
 });
 

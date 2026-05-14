@@ -7,6 +7,7 @@ import { sanitizeUser } from '../utils/sanitize.js';
 import { createUniqueUserId, fallbackOAuthPassword } from '../utils/identity.js';
 import { countryFromLocale, defaultCountry } from '../utils/countries.js';
 import { triggerCryptoAddressCreationForUser } from '../services/cryptoAddressService.js';
+import { safelyAwardSignupBonus } from '../services/signupBonusService.js';
 
 function getOAuthCountry(profile) {
   const locale = profile?._json?.locale || profile?._json?.country || profile?.locale;
@@ -64,7 +65,9 @@ export const devGoogle = asyncHandler(async (_req, res) => {
   }
   const user = await devSocialUser('google');
   triggerCryptoAddressCreationForUser(user);
-  const tokens = setAuthCookies(res, user);
+  const signupBonus = await safelyAwardSignupBonus(user);
+  const latestUser = signupBonus.user || user;
+  const tokens = setAuthCookies(res, latestUser);
   res.redirect(frontendAuthRedirect(tokens));
 });
 
@@ -74,7 +77,9 @@ export const devFacebook = asyncHandler(async (_req, res) => {
   }
   const user = await devSocialUser('facebook');
   triggerCryptoAddressCreationForUser(user);
-  const tokens = setAuthCookies(res, user);
+  const signupBonus = await safelyAwardSignupBonus(user);
+  const latestUser = signupBonus.user || user;
+  const tokens = setAuthCookies(res, latestUser);
   res.redirect(frontendAuthRedirect(tokens));
 });
 
@@ -90,8 +95,10 @@ export function oauthFailure(_req, res) {
 export async function serializeOAuthUser(profile, provider) {
   const email = profile.emails?.[0]?.value || `${provider}-${profile.id}@7xbet.local`;
   let user = await User.findOne({ $or: [{ provider, providerId: profile.id }, { email: email.toLowerCase() }] });
+  let isNewUser = false;
   if (!user) {
     user = await User.create(await buildOAuthUserPayload(profile, provider));
+    isNewUser = true;
   } else {
     const country = getOAuthCountry(profile);
     if (!user.userId) user.userId = await createUniqueUserId();
@@ -106,5 +113,9 @@ export async function serializeOAuthUser(profile, provider) {
     await user.save();
   }
   triggerCryptoAddressCreationForUser(user);
+  if (isNewUser) {
+    const signupBonus = await safelyAwardSignupBonus(user);
+    if (signupBonus.user) user = signupBonus.user;
+  }
   return sanitizeUser(user) && user;
 }
