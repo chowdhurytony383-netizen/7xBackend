@@ -1,4 +1,3 @@
-import Verification from '../models/Verification.js';
 import TurnoverRequirement from '../models/TurnoverRequirement.js';
 import { AppError, assertOrThrow } from '../utils/appError.js';
 import { env } from '../config/env.js';
@@ -17,32 +16,26 @@ function positiveNumber(value, fallback) {
   return Number.isFinite(number) && number >= 0 ? number : fallback;
 }
 
+function hasText(value) {
+  return String(value || '').trim().length > 0;
+}
+
 function getTurnoverMultiplierForType(type = '') {
   const normalizedType = String(type || '').toLowerCase();
 
-  // New rule requested by admin:
-  // - Deposit balance: only half of the deposited amount is turnover-locked.
-  // - Bonus balance: the full bonus amount is turnover-locked.
+  // Active rule:
+  // - Signup/new-account bonus: 100 BDT equivalent must be wagered 2x before withdrawal.
+  // - Other bonus credits follow the same bonus multiplier by default.
+  // - Deposit turnover remains configurable and defaults to 50% of deposit amount.
   if (normalizedType === 'deposit') {
     return positiveNumber(env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER ?? env.DEPOSIT_TURNOVER_MULTIPLIER, 0.5);
   }
 
   if (normalizedType === 'bonus') {
-    return positiveNumber(env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER ?? env.BONUS_TURNOVER_MULTIPLIER, 1);
+    return positiveNumber(env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER ?? env.BONUS_TURNOVER_MULTIPLIER, 2);
   }
 
   return positiveNumber(env.WITHDRAW_TURNOVER_MULTIPLIER, 1);
-}
-
-function hasText(value) {
-  return String(value || '').trim().length > 0;
-}
-
-function isEmailVerified(user = {}) {
-  if (user.isVerified === true || user.emailVerified === true) return true;
-  // OAuth providers normally return a verified email from the provider.
-  return ['google', 'facebook'].includes(String(user.provider || '').toLowerCase())
-    || ['google', 'facebook'].includes(String(user.registrationType || '').toLowerCase());
 }
 
 function isDepositCreditSource(source = '') {
@@ -81,6 +74,8 @@ function isWagerDebitSource(source = '') {
     || value.includes('casino-bet')
     || value.includes('slot-bet')
     || value.includes('vgames-bet')
+    || value.includes('jili-bet')
+    || value.includes('provider-wallet-debit')
     || value.includes('game-bet')
     || value.includes('wager');
 }
@@ -170,39 +165,35 @@ export async function getWithdrawalTurnoverSummary(userId, walletBalance = 0) {
 }
 
 export async function getWithdrawalProfileStatus(user) {
-  const verification = await Verification.findOne({ user: user._id }).sort({ updatedAt: -1 });
+  // Account/KYC document verification is intentionally disabled for withdrawals.
+  // The function is kept for API compatibility with the existing codebase.
   const missing = [];
 
-  if (!isEmailVerified(user)) missing.push('Email verification');
-
-  const fullName = hasText(user.fullName) || hasText(user.name) || hasText(verification?.fullName);
-  if (!fullName) missing.push('Full name');
-
-  const address = hasText(user.address) || hasText(verification?.address);
-  if (!address) missing.push('Address');
-
-  const documentSubmitted = Boolean(
-    verification
-    && verification.status !== 'rejected'
-    && (hasText(verification.documentFront) || hasText(verification.documentBack))
-  );
-  if (!documentSubmitted) missing.push('Identity document');
+  // If main admin later enables WITHDRAW_KYC_REQUIRED=true, this still does not
+  // require documents; it only checks a basic display name so legacy flows do not
+  // reintroduce document verification by mistake.
+  if (boolEnv(env.WITHDRAW_KYC_REQUIRED, false)) {
+    const fullName = hasText(user?.fullName) || hasText(user?.name) || hasText(user?.username) || hasText(user?.userId);
+    if (!fullName) missing.push('Full name');
+  }
 
   return {
     ok: missing.length === 0,
     missing,
-    verificationStatus: verification?.status || user.verificationStatus || 'not_submitted',
+    verificationStatus: 'not_required',
+    verificationRequired: false,
+    documentUploadRequired: false,
   };
 }
 
 export async function assertWithdrawalAllowedForUser(user, amount) {
-  if (boolEnv(env.WITHDRAW_KYC_REQUIRED, true)) {
+  if (boolEnv(env.WITHDRAW_KYC_REQUIRED, false)) {
     const profileStatus = await getWithdrawalProfileStatus(user);
     assertOrThrow(
       profileStatus.ok,
       `Withdrawal locked. Please submit: ${profileStatus.missing.join(', ')}.`,
       403,
-      { code: 'WITHDRAW_KYC_REQUIRED', missing: profileStatus.missing, verificationStatus: profileStatus.verificationStatus }
+      { code: 'WITHDRAW_PROFILE_REQUIRED', missing: profileStatus.missing, verificationStatus: profileStatus.verificationStatus }
     );
   }
 

@@ -179,19 +179,19 @@ function isEmailVerified(user = {}) {
 }
 
 export async function getFirstDepositBonusEligibility(user = {}) {
-  const verification = await Verification.findOne({ user: user._id }).sort({ updatedAt: -1 });
-  const missing = [];
-
-  if (!isEmailVerified(user)) missing.push('Email verification');
-  if (!(hasText(user.fullName) || hasText(user.name) || hasText(verification?.fullName))) missing.push('Full Name');
-  if (!(hasText(user.address) || hasText(verification?.address))) missing.push('Address');
-
+  // Verification documents are no longer required for deposit/bonus eligibility.
+  // This compatibility function always allows the legacy first-deposit bonus when
+  // that bonus is explicitly enabled by env. The active default bonus is now the
+  // signup bonus in signupBonusService.js.
   return {
-    eligible: missing.length === 0,
-    missing,
-    verificationStatus: verification?.status || user.verificationStatus || 'not_submitted',
+    eligible: true,
+    missing: [],
+    verificationStatus: user.verificationStatus || 'not_required',
+    verificationRequired: false,
+    documentUploadRequired: false,
   };
 }
+
 
 export async function awardFirstDepositBonusForTransaction(depositTransaction) {
   if (!boolEnv(env.FIRST_DEPOSIT_BONUS_ENABLED, true)) {
