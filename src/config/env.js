@@ -116,9 +116,26 @@ export const env = {
   AGENT_COMMISSION_PAYOUT_TIMEZONE: process.env.AGENT_COMMISSION_PAYOUT_TIMEZONE || 'Asia/Dhaka',
   AGENT_COMMISSION_PAYOUT_CHECK_MS: Number(process.env.AGENT_COMMISSION_PAYOUT_CHECK_MS || 60 * 60 * 1000),
 
+  // New account signup bonus.
+  // Default: every newly registered account receives the equivalent of BDT 100
+  // in the user's registered currency. Withdrawal requires 2x wagering, so BDT
+  // 100 bonus requires BDT 200 equivalent in bets.
+  SIGNUP_BONUS_ENABLED: String(process.env.SIGNUP_BONUS_ENABLED || 'true').toLowerCase() === 'true',
+  SIGNUP_BONUS_BASE_AMOUNT_BDT: Number(process.env.SIGNUP_BONUS_BASE_AMOUNT_BDT || 100),
+  SIGNUP_BONUS_TURNOVER_MULTIPLIER: Number(process.env.SIGNUP_BONUS_TURNOVER_MULTIPLIER || 2),
+  SIGNUP_BONUS_BDT_RATES_JSON: process.env.SIGNUP_BONUS_BDT_RATES_JSON || '',
+  SIGNUP_BONUS_AMOUNT_BY_CURRENCY_JSON: process.env.SIGNUP_BONUS_AMOUNT_BY_CURRENCY_JSON || '',
+  SIGNUP_BONUS_EXCHANGE_API_URL: process.env.SIGNUP_BONUS_EXCHANGE_API_URL || '',
+  SIGNUP_BONUS_USE_LIVE_RATES: String(process.env.SIGNUP_BONUS_USE_LIVE_RATES || 'true').toLowerCase() === 'true',
+  SIGNUP_BONUS_RATE_CACHE_MS: Number(process.env.SIGNUP_BONUS_RATE_CACHE_MS || 6 * 60 * 60 * 1000),
+
+  // Legacy first-deposit bonus is disabled by default because the active rule is
+  // now the signup bonus above. Set true only if you intentionally want both.
+  FIRST_DEPOSIT_BONUS_ENABLED: String(process.env.FIRST_DEPOSIT_BONUS_ENABLED || 'false').toLowerCase() === 'true',
+
   // Withdrawal security rules.
-  // true = users must verify email, submit full name, address, and identity document before any withdraw.
-  WITHDRAW_KYC_REQUIRED: String(process.env.WITHDRAW_KYC_REQUIRED || 'true').toLowerCase() === 'true',
+  // Account/KYC document verification is not required for withdrawal by default.
+  WITHDRAW_KYC_REQUIRED: String(process.env.WITHDRAW_KYC_REQUIRED || 'false').toLowerCase() === 'true',
   // true = every deposit/bonus must be wagered before the user can withdraw that balance.
   WITHDRAW_TURNOVER_REQUIRED: String(process.env.WITHDRAW_TURNOVER_REQUIRED || 'true').toLowerCase() === 'true',
   // 1 = deposit 100 requires 100 total bets before withdraw; 2 = deposit 100 requires 200 bets.
@@ -127,8 +144,8 @@ export const env = {
   // Optional split turnover rules: deposit and bonus can have different multipliers.
   // Example: deposit 1000 => turnover 500 when WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER=0.5.
   WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER: process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER),
-  // Example: bonus 1000 => bonus turnover 1000 when WITHDRAW_BONUS_TURNOVER_MULTIPLIER=1.
-  WITHDRAW_BONUS_TURNOVER_MULTIPLIER: process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER),
+  // Example: signup bonus 100 => turnover 200 when WITHDRAW_BONUS_TURNOVER_MULTIPLIER=2.
+  WITHDRAW_BONUS_TURNOVER_MULTIPLIER: process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER === undefined ? 2 : Number(process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER),
 
   // Free/low-cost automatic sports betting system.
   // Requires a free odds API key such as The Odds API.
