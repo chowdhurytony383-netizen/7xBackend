@@ -87,6 +87,14 @@ const userSchema = new mongoose.Schema({
 
   wallet: { type: Number, default: 0, min: 0 },
 
+  // New account signup bonus state. Every new account can receive a one-time
+  // 100 BDT-equivalent welcome bonus in the user's registered currency.
+  signupBonusAwarded: { type: Boolean, default: false, index: true },
+  signupBonusAwardedAt: Date,
+  signupBonusAmount: { type: Number, default: 0, min: 0 },
+  signupBonusCurrency: { type: String, trim: true, uppercase: true, default: '' },
+  signupBonusSourceTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+
   // First deposit bonus state. Kept on the user document so a rejected/cancelled
   // first-deposit bonus cannot be claimed again later.
   firstDepositBonusAwarded: { type: Boolean, default: false, index: true },
