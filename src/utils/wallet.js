@@ -2,6 +2,7 @@ import User from '../models/User.js';
 import WalletSnapshot from '../models/WalletSnapshot.js';
 import { AppError } from './appError.js';
 import { recordTurnoverCredit, recordWagerTurnover } from '../services/withdrawalGuardService.js';
+import { recordReferralTurnover } from '../services/referralRewardService.js';
 
 export async function debitWallet(userId, amount, source = '') {
   const user = await User.findOneAndUpdate(
@@ -13,6 +14,9 @@ export async function debitWallet(userId, amount, source = '') {
   const snapshot = await WalletSnapshot.create({ user: userId, walletAmount: user.wallet, actualWalletAfterBets: user.wallet, netBetResult: -amount, source });
   await recordWagerTurnover(userId, amount, source).catch((error) => {
     console.error('Turnover wager tracking failed:', error.message);
+  });
+  await recordReferralTurnover(userId, amount, source).catch((error) => {
+    console.error('Referral turnover tracking failed:', error.message);
   });
   return user;
 }
