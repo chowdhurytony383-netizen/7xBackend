@@ -88,6 +88,17 @@ export function getAttributionCodeFromRequest(req) {
   };
 }
 
+export function buildRegistrationMeta(req) {
+  const ip = getClientIp(req);
+  const userAgent = req.headers?.['user-agent'] || '';
+  return {
+    ipHash: ip ? sha256(ip) : '',
+    userAgentHash: userAgent ? sha256(userAgent) : '',
+    referrer: String(req.body?.referrer || req.headers?.referer || '').slice(0, 500),
+    landingPage: String(req.body?.landingPage || req.headers?.referer || '').slice(0, 500),
+  };
+}
+
 export async function buildRegistrationAttribution(req) {
   const { affiliateCode, referralCode } = getAttributionCodeFromRequest(req);
 
