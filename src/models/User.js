@@ -61,6 +61,7 @@ const userSchema = new mongoose.Schema({
     default: '',
   },
 
+  // Backward-compatible fields kept because older frontend/builds may still send referralCode.
   referralCode: {
     type: String,
     trim: true,
@@ -72,6 +73,19 @@ const userSchema = new mongoose.Schema({
     trim: true,
     default: '',
   },
+
+  // Invite / affiliate attribution. A player must have exactly one acquisition source.
+  inviteCode: { type: String, trim: true, uppercase: true, unique: true, sparse: true, index: true },
+  acquisitionSource: {
+    type: String,
+    enum: ['organic', 'invite', 'affiliate'],
+    default: 'organic',
+    index: true,
+  },
+  referredByUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+  referredByCode: { type: String, trim: true, uppercase: true, default: '', index: true },
+  affiliatePartner: { type: mongoose.Schema.Types.ObjectId, ref: 'AffiliatePartner', index: true },
+  affiliateCode: { type: String, trim: true, uppercase: true, default: '', index: true },
 
   role: {
     type: String,
@@ -86,14 +100,6 @@ const userSchema = new mongoose.Schema({
   },
 
   wallet: { type: Number, default: 0, min: 0 },
-
-  // New account signup bonus state. Every new account can receive a one-time
-  // 100 BDT-equivalent welcome bonus in the user's registered currency.
-  signupBonusAwarded: { type: Boolean, default: false, index: true },
-  signupBonusAwardedAt: Date,
-  signupBonusAmount: { type: Number, default: 0, min: 0 },
-  signupBonusCurrency: { type: String, trim: true, uppercase: true, default: '' },
-  signupBonusSourceTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
 
   // First deposit bonus state. Kept on the user document so a rejected/cancelled
   // first-deposit bonus cannot be claimed again later.
