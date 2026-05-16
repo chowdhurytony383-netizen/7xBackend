@@ -86,6 +86,12 @@ const userSchema = new mongoose.Schema({
   referredByCode: { type: String, trim: true, uppercase: true, default: '', index: true },
   affiliatePartner: { type: mongoose.Schema.Types.ObjectId, ref: 'AffiliatePartner', index: true },
   affiliateCode: { type: String, trim: true, uppercase: true, default: '', index: true },
+  registrationMeta: {
+    ipHash: { type: String, trim: true, default: '', index: true },
+    userAgentHash: { type: String, trim: true, default: '', index: true },
+    referrer: { type: String, trim: true, default: '' },
+    landingPage: { type: String, trim: true, default: '' },
+  },
 
   role: {
     type: String,

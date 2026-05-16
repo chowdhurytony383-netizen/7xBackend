@@ -17,6 +17,11 @@ const affiliatePeriodSchema = new mongoose.Schema({
   commissionAmount: { type: Number, default: 0, min: 0 },
   carryoverAfter: { type: Number, default: 0 },
 
+  riskStatus: { type: String, enum: ['clear', 'review', 'held'], default: 'clear', index: true },
+  riskScore: { type: Number, default: 0 },
+  fraudFlagCount: { type: Number, default: 0 },
+  fraudSummary: { type: mongoose.Schema.Types.Mixed, default: {} },
+
   sourceBreakdown: {
     internal: { bets: { type: Number, default: 0 }, wins: { type: Number, default: 0 } },
     crash: { bets: { type: Number, default: 0 }, wins: { type: Number, default: 0 } },

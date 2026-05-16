@@ -37,6 +37,14 @@ const affiliatePartnerSchema = new mongoose.Schema({
   negativeCarryover: { type: Boolean, default: true },
   carryoverBalance: { type: Number, default: 0 },
 
+  payoutCurrency: { type: String, trim: true, uppercase: true, default: '' },
+  minimumPayoutUsd: { type: Number, default: 30, min: 0 },
+  weeklyPayoutDay: { type: Number, default: 2, min: 0, max: 6 }, // 0=Sunday, 2=Tuesday
+  autoPayoutEnabled: { type: Boolean, default: true },
+  payoutHold: { type: Boolean, default: false, index: true },
+  payoutHoldReason: { type: String, trim: true, default: '' },
+  lastAutoPayoutWeekKey: { type: String, trim: true, default: '', index: true },
+
   stats: {
     clicks: { type: Number, default: 0 },
     registrations: { type: Number, default: 0 },
@@ -52,6 +60,16 @@ const affiliatePartnerSchema = new mongoose.Schema({
     commissionApproved: { type: Number, default: 0 },
     commissionPaid: { type: Number, default: 0 },
     pendingCommission: { type: Number, default: 0 },
+    heldCommission: { type: Number, default: 0 },
+    lastMinimumPayoutLocal: { type: Number, default: 0 },
+    lastMinimumPayoutCurrency: { type: String, trim: true, uppercase: true, default: '' },
+  },
+
+  fraud: {
+    openFlags: { type: Number, default: 0 },
+    highRiskFlags: { type: Number, default: 0 },
+    lastScanAt: Date,
+    lastRiskLevel: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'low' },
   },
 
   payoutMethods: { type: [payoutMethodSchema], default: [] },
