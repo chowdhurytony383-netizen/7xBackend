@@ -7,6 +7,7 @@ import { env } from '../config/env.js';
 import { AppError, assertOrThrow } from '../utils/appError.js';
 import { creditWallet } from '../utils/wallet.js';
 import { safelyAwardFirstDepositBonus } from './firstDepositBonusService.js';
+import { handleSuccessfulDepositForReferral } from './referralRewardService.js';
 import { convertCryptoToFiat } from './cryptoPriceService.js';
 import { maybeAutoSweepAfterCredit } from './cryptoAutoSweepService.js';
 
@@ -378,6 +379,7 @@ export async function processCryptoWebhookPayload(payload) {
       await deposit.save();
 
       const bonusResult = await safelyAwardFirstDepositBonus(tx);
+      await handleSuccessfulDepositForReferral(tx).catch((error) => { console.error('Referral reward creation failed:', error.message); });
 
       let autoSweep = { status: 'not_attempted' };
       try {
