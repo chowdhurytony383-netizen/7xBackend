@@ -4,6 +4,7 @@ import { connectDB } from './config/db.js';
 import { env } from './config/env.js';
 import { initRealtimeSockets } from './socket/index.js';
 import { startAgentCommissionPayoutScheduler } from './services/agentCommissionService.js';
+import { startAffiliateWeeklyScheduler } from './services/affiliateAutomationService.js';
 
 async function start() {
   try {
@@ -14,6 +15,7 @@ async function start() {
     await initRealtimeSockets(server);
 
     startAgentCommissionPayoutScheduler();
+    startAffiliateWeeklyScheduler();
 
     server.listen(env.PORT, () => {
       console.log(`7XBET backend running on http://localhost:${env.PORT}`);
