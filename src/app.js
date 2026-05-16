@@ -33,6 +33,9 @@ import crashGameRoutes from './routes/crashGameRoutes.js';
 import cryptoRoutes from './routes/cryptoRoutes.js';
 import adminCryptoRoutes from './routes/adminCryptoRoutes.js';
 import jiliRoutes from './routes/jiliRoutes.js';
+import affiliateRoutes from './routes/affiliateRoutes.js';
+import referralRoutes from './routes/referralRoutes.js';
+import adminAffiliateRoutes from './routes/adminAffiliateRoutes.js';
 
 // 7X Crush provider launch route
 import crushProviderLaunchRoutes from './routes/crushProviderLaunchRoutes.js';
@@ -118,6 +121,8 @@ app.get('/api/health', (_req, res) =>
 );
 
 app.use('/api/user', userRoutes);
+app.use('/api/affiliate', affiliateRoutes);
+app.use('/api/referral', referralRoutes);
 app.use('/api/bet', betRoutes);
 
 // 7X Crush provider launch API
@@ -140,6 +145,7 @@ app.use('/api/transaction', transactionRoutes);
 app.use('/api/razorpay', razorpayRoutes);
 
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin', adminAffiliateRoutes);
 app.use('/api/admin', adminCryptoRoutes);
 app.use('/api/admin', adminAgentPaymentRoutes);
 app.use('/api/admin', adminAgentRequestRoutes);
