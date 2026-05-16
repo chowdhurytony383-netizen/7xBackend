@@ -12,6 +12,7 @@ import { optionalString, requireNumber, requireString } from '../utils/validatio
 import { creditWallet } from '../utils/wallet.js';
 import { sanitizeUser } from '../utils/sanitize.js';
 import { safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
+import { handleSuccessfulDepositForReferral } from '../services/referralRewardService.js';
 
 
 function boolFromBody(value, fallback = true) {
@@ -288,6 +289,7 @@ async function updateTransactionStatus(req, res, expectedType) {
   if (expectedType === 'DEPOSIT' && status === 'SUCCESS' && prevStatus !== 'SUCCESS') {
     await creditWallet(transaction.user, transaction.amount, 'admin-deposit-approval');
     bonusResult = await safelyAwardFirstDepositBonus(transaction);
+    await handleSuccessfulDepositForReferral(transaction).catch((error) => { console.error('Referral reward creation failed:', error.message); });
   }
 
   if (expectedType === 'WITHDRAW' && ['REJECTED', 'FAILED', 'CANCELLED'].includes(status) && !['REJECTED', 'FAILED', 'CANCELLED'].includes(prevStatus)) {

@@ -9,6 +9,7 @@ import { creditWallet, debitWallet } from '../utils/wallet.js';
 import { optionalString } from '../utils/validation.js';
 import { recordAgentCommissionForRequest } from '../services/agentCommissionService.js';
 import { safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
+import { handleSuccessfulDepositForReferral } from '../services/referralRewardService.js';
 
 function normalizeType(type) {
   const value = String(type || '').toUpperCase();
@@ -97,6 +98,7 @@ export const confirmAgentRequest = asyncHandler(async (req, res) => {
     });
 
     const bonusResult = await safelyAwardFirstDepositBonus(transaction);
+    await handleSuccessfulDepositForReferral(transaction).catch((error) => { console.error('Referral reward creation failed:', error.message); });
 
     return res.json({
       success: true,

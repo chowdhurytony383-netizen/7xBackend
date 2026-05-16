@@ -12,7 +12,7 @@ import { createUniqueUserId, generatePassword } from '../utils/identity.js';
 import { currencyForResolvedCountry, resolveRegistrationCountry } from '../utils/requestCountry.js';
 import { saveUploadedFile } from '../utils/cloudinary.js';
 import { triggerCryptoAddressCreationForUser } from '../services/cryptoAddressService.js';
-import { safelyAwardSignupBonus } from '../services/signupBonusService.js';
+import { buildRegistrationAttribution, createUniqueInviteCode, markRegistrationForAffiliate } from '../services/affiliateAttributionService.js';
 
 async function createAndSendVerification(user) {
   const token = randomToken(24);
@@ -104,6 +104,8 @@ export const register = asyncHandler(async (req, res) => {
   const countryInfo = resolveRegistrationCountry(req);
   const currency = currencyForResolvedCountry(countryInfo);
   const userId = await createUniqueUserId();
+  const attribution = await buildRegistrationAttribution(req);
+  const inviteCode = await createUniqueInviteCode(userId);
 
   const user = await User.create({
     userId,
@@ -117,34 +119,38 @@ export const register = asyncHandler(async (req, res) => {
     country: countryInfo.name,
     countryCode: countryInfo.code,
     currency,
-    referralCode: optionalString(req.body.referralCode, 80) || '',
-    referredBy: optionalString(req.body.referralCode, 80) || '',
+    inviteCode,
+    referralCode: optionalString(req.body.referralCode || req.body.ref || req.body.inviteCode, 80) || '',
+    referredBy: attribution.referredByCode || optionalString(req.body.referralCode || req.body.ref || req.body.inviteCode, 80) || '',
+    acquisitionSource: attribution.acquisitionSource,
+    referredByUser: attribution.referredByUser,
+    referredByCode: attribution.referredByCode,
+    affiliatePartner: attribution.affiliatePartner,
+    affiliateCode: attribution.affiliateCode,
     isVerified: false,
   });
 
+  await markRegistrationForAffiliate(user);
   triggerCryptoAddressCreationForUser(user);
-  const signupBonus = await safelyAwardSignupBonus(user);
-  const latestUser = signupBonus.user || await User.findById(user._id);
-  await createAndSendVerification(latestUser);
-  const tokens = setAuthCookies(res, latestUser);
+  await createAndSendVerification(user);
+  const tokens = setAuthCookies(res, user);
 
   res.status(201).json({
     success: true,
-    message: signupBonus.awarded
-      ? `Account created. ${signupBonus.amount} ${signupBonus.currency} signup bonus credited. Check your inbox for email verification.`
-      : 'Account created. Check your inbox for email verification.',
-    data: authData(latestUser, tokens, { login: userId, signupBonus }),
-    signupBonus,
+    message: 'Account created. Check your inbox for verification.',
+    data: authData(user, tokens, { login: userId }),
   });
 });
 
 export const oneClickRegister = asyncHandler(async (req, res) => {
   const countryInfo = resolveRegistrationCountry(req);
   const currency = currencyForResolvedCountry(countryInfo);
-  const referralCode = optionalString(req.body.referralCode, 80) || '';
+  const referralCode = optionalString(req.body.referralCode || req.body.ref || req.body.inviteCode, 80) || '';
   const userId = await createUniqueUserId();
   const password = generatePassword(8);
   const name = `User ${userId}`;
+  const attribution = await buildRegistrationAttribution(req);
+  const inviteCode = await createUniqueInviteCode(userId);
 
   const user = await User.create({
     userId,
@@ -156,25 +162,27 @@ export const oneClickRegister = asyncHandler(async (req, res) => {
     country: countryInfo.name,
     countryCode: countryInfo.code,
     currency,
+    inviteCode,
     referralCode,
-    referredBy: referralCode,
+    referredBy: attribution.referredByCode || referralCode,
+    acquisitionSource: attribution.acquisitionSource,
+    referredByUser: attribution.referredByUser,
+    referredByCode: attribution.referredByCode,
+    affiliatePartner: attribution.affiliatePartner,
+    affiliateCode: attribution.affiliateCode,
     provider: 'one-click',
     registrationType: 'one-click',
     isVerified: false,
     verificationStatus: 'not_submitted',
   });
 
+  await markRegistrationForAffiliate(user);
   triggerCryptoAddressCreationForUser(user);
-  const signupBonus = await safelyAwardSignupBonus(user);
-  const latestUser = signupBonus.user || await User.findById(user._id);
-  const tokens = setAuthCookies(res, latestUser);
+  const tokens = setAuthCookies(res, user);
   res.status(201).json({
     success: true,
-    message: signupBonus.awarded
-      ? `One click registration completed. ${signupBonus.amount} ${signupBonus.currency} signup bonus credited.`
-      : 'One click registration completed.',
-    data: authData(latestUser, tokens, { login: userId, password, signupBonus }),
-    signupBonus,
+    message: 'One click registration completed.',
+    data: authData(user, tokens, { login: userId, password }),
   });
 });
 
