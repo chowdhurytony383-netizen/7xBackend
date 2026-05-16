@@ -12,7 +12,8 @@ import { createUniqueUserId, generatePassword } from '../utils/identity.js';
 import { currencyForResolvedCountry, resolveRegistrationCountry } from '../utils/requestCountry.js';
 import { saveUploadedFile } from '../utils/cloudinary.js';
 import { triggerCryptoAddressCreationForUser } from '../services/cryptoAddressService.js';
-import { buildRegistrationAttribution, createUniqueInviteCode, markRegistrationForAffiliate } from '../services/affiliateAttributionService.js';
+import { buildRegistrationAttribution,
+  buildRegistrationMeta, createUniqueInviteCode, markRegistrationForAffiliate } from '../services/affiliateAttributionService.js';
 
 async function createAndSendVerification(user) {
   const token = randomToken(24);
@@ -105,6 +106,7 @@ export const register = asyncHandler(async (req, res) => {
   const currency = currencyForResolvedCountry(countryInfo);
   const userId = await createUniqueUserId();
   const attribution = await buildRegistrationAttribution(req);
+  const registrationMeta = buildRegistrationMeta(req);
   const inviteCode = await createUniqueInviteCode(userId);
 
   const user = await User.create({
@@ -127,6 +129,7 @@ export const register = asyncHandler(async (req, res) => {
     referredByCode: attribution.referredByCode,
     affiliatePartner: attribution.affiliatePartner,
     affiliateCode: attribution.affiliateCode,
+    registrationMeta,
     isVerified: false,
   });
 
@@ -150,6 +153,7 @@ export const oneClickRegister = asyncHandler(async (req, res) => {
   const password = generatePassword(8);
   const name = `User ${userId}`;
   const attribution = await buildRegistrationAttribution(req);
+  const registrationMeta = buildRegistrationMeta(req);
   const inviteCode = await createUniqueInviteCode(userId);
 
   const user = await User.create({
@@ -170,6 +174,7 @@ export const oneClickRegister = asyncHandler(async (req, res) => {
     referredByCode: attribution.referredByCode,
     affiliatePartner: attribution.affiliatePartner,
     affiliateCode: attribution.affiliateCode,
+    registrationMeta,
     provider: 'one-click',
     registrationType: 'one-click',
     isVerified: false,
