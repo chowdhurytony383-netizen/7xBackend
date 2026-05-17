@@ -15,7 +15,6 @@ export const verificationUpload = multer({
   { name: 'documentBack', maxCount: 1 },
 ]);
 
-
 function imageFileFilter(_req, file, cb) {
   const allowed = ['image/jpeg', 'image/png', 'image/webp'];
   if (!allowed.includes(file.mimetype)) return cb(new Error('Only JPG, PNG or WEBP images are allowed'));
@@ -30,4 +29,40 @@ export const profilePictureUpload = multer({
   { name: 'picture', maxCount: 1 },
   { name: 'profilePicture', maxCount: 1 },
   { name: 'avatar', maxCount: 1 },
+]);
+
+function supportFileFilter(_req, file, cb) {
+  const allowed = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'application/pdf',
+    'text/plain',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ];
+
+  if (!allowed.includes(file.mimetype)) {
+    return cb(new Error('Only images, PDF, TXT, DOC, DOCX, XLS or XLSX files are allowed'));
+  }
+
+  cb(null, true);
+}
+
+export const supportAttachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: supportFileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 5,
+  },
+}).fields([
+  { name: 'attachments', maxCount: 5 },
+  { name: 'files', maxCount: 5 },
+  { name: 'file', maxCount: 1 },
+  { name: 'photo', maxCount: 1 },
+  { name: 'image', maxCount: 1 },
 ]);
