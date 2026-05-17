@@ -3,6 +3,24 @@ import { env } from '../config/env.js';
 import { crashEngine } from '../gameEngines/crashEngine.js';
 import { getSocketUser } from '../utils/socketAuth.js';
 
+let realtimeIO = null;
+
+export function getRealtimeIO() {
+  return realtimeIO;
+}
+
+export function emitToUser(userId, event, payload) {
+  if (!realtimeIO || !userId) return false;
+  realtimeIO.to(`user:${userId}`).emit(event, payload);
+  return true;
+}
+
+export function emitToAdmins(event, payload) {
+  if (!realtimeIO) return false;
+  realtimeIO.to('admins').emit(event, payload);
+  return true;
+}
+
 function parseOrigins() {
   const values = new Set();
   [env.FRONTEND_URL, process.env.CLIENT_URL, process.env.CORS_ORIGIN]
@@ -29,6 +47,8 @@ export async function initRealtimeSockets(server) {
     pingInterval: 25000,
   });
 
+  realtimeIO = io;
+
   await crashEngine.init(io);
 
   io.on('connection', async (socket) => {
@@ -36,6 +56,8 @@ export async function initRealtimeSockets(server) {
     if (user) {
       socket.user = user;
       socket.join(`user:${user._id}`);
+      const isAdmin = user.role === 'admin' || user.permissions?.includes?.('admin');
+      if (isAdmin) socket.join('admins');
     }
 
     socket.join('crash');
