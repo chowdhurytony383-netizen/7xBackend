@@ -15,18 +15,35 @@ export async function getTicketWithUser(ticketId) {
     .lean();
 }
 
-export async function addSupportMessage({ ticket, sender, senderRole, message, attachments = [] }) {
+function buildMessagePreview(message = '', attachments = []) {
+  const cleanMessage = String(message || '').trim();
+  if (cleanMessage) return cleanMessage.slice(0, 300);
+
+  if (attachments?.length) {
+    const count = attachments.length;
+    const first = attachments[0]?.originalName || attachments[0]?.name || 'attachment';
+    return count === 1 ? `Attachment: ${first}` : `${count} attachments sent`;
+  }
+
+  return 'New support message';
+}
+
+export async function addSupportMessage({ ticket, sender, senderRole, message = '', attachments = [] }) {
+  const cleanMessage = String(message || '').trim();
+  const cleanAttachments = Array.isArray(attachments) ? attachments.filter((item) => item?.url) : [];
+
   const messageDoc = await SupportMessage.create({
     ticket: ticket._id,
     user: sender?._id || sender || ticket.user,
     senderRole,
-    message,
-    attachments,
+    message: cleanMessage,
+    attachments: cleanAttachments,
     readByUserAt: senderRole === 'user' ? new Date() : undefined,
     readByAdminAt: senderRole === 'admin' ? new Date() : undefined,
   });
 
-  ticket.lastMessage = message.slice(0, 300);
+  const preview = buildMessagePreview(cleanMessage, cleanAttachments);
+  ticket.lastMessage = preview;
   ticket.lastMessageAt = new Date();
   ticket.lastMessageBy = senderRole;
 
@@ -47,12 +64,16 @@ export async function addSupportMessage({ ticket, sender, senderRole, message, a
     .lean();
 
   const freshTicket = await getTicketWithUser(ticket._id);
+  const payload = { ticket: freshTicket, message: populatedMessage };
+
+  // Broadcast to both sides so all open tabs/devices update without refresh.
+  emitToUser(ticket.user, 'support:message', payload);
+  emitToAdmins('support:message', payload);
 
   if (senderRole === 'user') {
-    emitToAdmins('support:message', { ticket: freshTicket, message: populatedMessage });
     await createAdminNotification({
       title: `New support message: ${ticket.ticketNo}`,
-      message: ticket.lastMessage,
+      message: preview,
       type: 'support',
       actionUrl: `/admin/support?ticket=${ticket._id}`,
       metadata: { ticketId: String(ticket._id), ticketNo: ticket.ticketNo },
@@ -61,11 +82,10 @@ export async function addSupportMessage({ ticket, sender, senderRole, message, a
   }
 
   if (senderRole === 'admin') {
-    emitToUser(ticket.user, 'support:message', { ticket: freshTicket, message: populatedMessage });
     await createUserNotification({
       user: ticket.user,
       title: `Support reply: ${ticket.ticketNo}`,
-      message: ticket.lastMessage,
+      message: preview,
       type: 'support',
       actionUrl: `/support?ticket=${ticket._id}`,
       metadata: { ticketId: String(ticket._id), ticketNo: ticket.ticketNo },
