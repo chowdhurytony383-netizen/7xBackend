@@ -12,6 +12,7 @@ import { createUniqueUserId, generatePassword } from '../utils/identity.js';
 import { currencyForResolvedCountry, resolveRegistrationCountry } from '../utils/requestCountry.js';
 import { saveUploadedFile } from '../utils/cloudinary.js';
 import { triggerCryptoAddressCreationForUser } from '../services/cryptoAddressService.js';
+import { safelyAwardSignupBonus } from '../services/signupBonusService.js';
 import { buildRegistrationAttribution,
   buildRegistrationMeta, createUniqueInviteCode, markRegistrationForAffiliate } from '../services/affiliateAttributionService.js';
 
@@ -135,13 +136,28 @@ export const register = asyncHandler(async (req, res) => {
 
   await markRegistrationForAffiliate(user);
   triggerCryptoAddressCreationForUser(user);
-  await createAndSendVerification(user);
-  const tokens = setAuthCookies(res, user);
+
+  // Award Sign Up Bonus for every normal/email registration.
+  // safelyAwardSignupBonus is idempotent, so it will not double-credit if a bonus already exists.
+  const signupBonus = await safelyAwardSignupBonus(user);
+  const latestUser = signupBonus.user || user;
+
+  await createAndSendVerification(latestUser);
+  const tokens = setAuthCookies(res, latestUser);
 
   res.status(201).json({
     success: true,
     message: 'Account created. Check your inbox for verification.',
-    data: authData(user, tokens, { login: userId }),
+    data: authData(latestUser, tokens, {
+      login: userId,
+      signupBonus: {
+        awarded: Boolean(signupBonus.awarded),
+        amount: signupBonus.amount || 0,
+        currency: signupBonus.currency || latestUser.currency || currency,
+        requiredTurnover: signupBonus.requiredTurnover || 0,
+        reason: signupBonus.reason || '',
+      },
+    }),
   });
 });
 
@@ -183,11 +199,27 @@ export const oneClickRegister = asyncHandler(async (req, res) => {
 
   await markRegistrationForAffiliate(user);
   triggerCryptoAddressCreationForUser(user);
-  const tokens = setAuthCookies(res, user);
+
+  // Award Sign Up Bonus for one-click registrations too.
+  // The service is safe/idempotent and prevents duplicate signup bonuses.
+  const signupBonus = await safelyAwardSignupBonus(user);
+  const latestUser = signupBonus.user || user;
+
+  const tokens = setAuthCookies(res, latestUser);
   res.status(201).json({
     success: true,
     message: 'One click registration completed.',
-    data: authData(user, tokens, { login: userId, password }),
+    data: authData(latestUser, tokens, {
+      login: userId,
+      password,
+      signupBonus: {
+        awarded: Boolean(signupBonus.awarded),
+        amount: signupBonus.amount || 0,
+        currency: signupBonus.currency || latestUser.currency || currency,
+        requiredTurnover: signupBonus.requiredTurnover || 0,
+        reason: signupBonus.reason || '',
+      },
+    }),
   });
 });
 
