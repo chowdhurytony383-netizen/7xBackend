@@ -98,8 +98,9 @@ function syncAgentPaymentMethods(agent, globalMethods) {
       note: old.note || '',
       channelLabel: old.channelLabel || channel.channelLabel || '',
       depositEnabled: old.depositEnabled === undefined ? legacyActive : Boolean(old.depositEnabled),
-      withdrawEnabled: old.withdrawEnabled === undefined ? legacyActive : Boolean(old.withdrawEnabled),
-      isActive: legacyActive,
+      // Agent panel has one availability switch only. Withdraw follows deposit automatically.
+      withdrawEnabled: old.depositEnabled === undefined ? legacyActive : Boolean(old.depositEnabled),
+      isActive: old.depositEnabled === undefined ? legacyActive : Boolean(old.depositEnabled),
       updatedAt: old.updatedAt,
     };
   });
@@ -130,7 +131,8 @@ function publicAgentPaymentPayload(agent, globalMethods, activeOnly = false) {
         groupKey: channel.groupKey || plain.key,
         groupSize: channel.groupSize || 1,
         depositEnabled: plain.depositEnabled !== false,
-        withdrawEnabled: plain.withdrawEnabled !== false,
+        // Withdraw option is intentionally tied to deposit status for agent channel workflow.
+        withdrawEnabled: plain.depositEnabled !== false,
         image: global.image || plain.image || '',
         category: global.category || 'e-wallets',
         minAmount: global.minAmount || 100,
@@ -183,8 +185,15 @@ export const updateMyPaymentMethod = asyncHandler(async (req, res) => {
 
   method.number = String(req.body.number || '').trim();
   method.note = String(req.body.note || '').trim();
-  method.depositEnabled = req.body.depositEnabled === true || String(req.body.depositEnabled) === 'true';
-  method.withdrawEnabled = req.body.withdrawEnabled === true || String(req.body.withdrawEnabled) === 'true';
+
+  // Agent can activate/inactivate only one switch.
+  // Deposit Active = Withdraw Active, Deposit Inactive = Withdraw Inactive.
+  const unifiedActive = req.body.depositEnabled !== undefined
+    ? (req.body.depositEnabled === true || String(req.body.depositEnabled) === 'true')
+    : (req.body.isActive === true || String(req.body.isActive) === 'true');
+
+  method.depositEnabled = unifiedActive;
+  method.withdrawEnabled = unifiedActive;
 
   if (req.file) {
     const imageUrl = await saveUploadedFile(req.file, {
@@ -197,7 +206,7 @@ export const updateMyPaymentMethod = asyncHandler(async (req, res) => {
     if (imageUrl) method.image = imageUrl;
   }
 
-  method.isActive = req.body.isActive === true || String(req.body.isActive) === 'true';
+  method.isActive = method.depositEnabled !== false;
   method.updatedAt = new Date();
 
   await agent.save();
