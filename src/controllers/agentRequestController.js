@@ -33,6 +33,10 @@ export const listMyAgentRequests = asyncHandler(async (req, res) => {
     filter.status = String(req.query.status).toUpperCase();
   }
 
+  if (req.query.methodKey) {
+    filter.methodKey = String(req.query.methodKey).trim().toLowerCase();
+  }
+
   const requests = await requestPopulate(
     AgentPaymentRequest.find(filter).sort({ createdAt: -1 }).limit(250)
   );
@@ -239,6 +243,10 @@ export const listAllAgentRequestsForAdmin = asyncHandler(async (req, res) => {
 
   if (req.query.userId) {
     filter.userId = String(req.query.userId);
+  }
+
+  if (req.query.methodKey) {
+    filter.methodKey = String(req.query.methodKey).trim().toLowerCase();
   }
 
   const requests = await requestPopulate(
