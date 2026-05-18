@@ -9,9 +9,16 @@ export function getRealtimeIO() {
   return realtimeIO;
 }
 
+function normalizeId(value) {
+  if (!value) return '';
+  if (typeof value === 'object' && value._id) return String(value._id);
+  return String(value);
+}
+
 export function emitToUser(userId, event, payload) {
-  if (!realtimeIO || !userId) return false;
-  realtimeIO.to(`user:${userId}`).emit(event, payload);
+  const id = normalizeId(userId);
+  if (!realtimeIO || !id) return false;
+  realtimeIO.to(`user:${id}`).emit(event, payload);
   return true;
 }
 
@@ -36,6 +43,25 @@ function safeAck(ack, payload) {
   if (typeof ack === 'function') ack(payload);
 }
 
+async function attachSocketUser(socket) {
+  const user = await getSocketUser(socket);
+  if (!user) return null;
+
+  socket.user = user;
+  socket.join(`user:${user._id}`);
+
+  const isAdmin = user.role === 'admin' || user.permissions?.includes?.('admin');
+  if (isAdmin) socket.join('admins');
+
+  socket.emit('realtime:ready', {
+    success: true,
+    userId: String(user._id),
+    isAdmin,
+  });
+
+  return user;
+}
+
 export async function initRealtimeSockets(server) {
   const io = new Server(server, {
     cors: {
@@ -52,13 +78,17 @@ export async function initRealtimeSockets(server) {
   await crashEngine.init(io);
 
   io.on('connection', async (socket) => {
-    const user = await getSocketUser(socket);
-    if (user) {
-      socket.user = user;
-      socket.join(`user:${user._id}`);
-      const isAdmin = user.role === 'admin' || user.permissions?.includes?.('admin');
-      if (isAdmin) socket.join('admins');
-    }
+    const user = await attachSocketUser(socket);
+
+    socket.on('realtime:auth', async (_payload = {}, ack) => {
+      const currentUser = await attachSocketUser(socket);
+      safeAck(ack, { success: Boolean(currentUser), userId: currentUser?._id ? String(currentUser._id) : null });
+    });
+
+    socket.on('support:join', async (_payload = {}, ack) => {
+      const currentUser = socket.user || await attachSocketUser(socket);
+      safeAck(ack, { success: Boolean(currentUser) });
+    });
 
     socket.join('crash');
     socket.emit('crash:state', await crashEngine.stateForUser(user?._id));
@@ -69,10 +99,8 @@ export async function initRealtimeSockets(server) {
 
     socket.on('crash:placeBet', async (payload = {}, ack) => {
       try {
-        const currentUser = socket.user || await getSocketUser(socket);
+        const currentUser = socket.user || await attachSocketUser(socket);
         if (!currentUser) throw new Error('Authentication required');
-        socket.user = currentUser;
-        socket.join(`user:${currentUser._id}`);
         const result = await crashEngine.placeBet(currentUser._id, payload.amount, payload.autoCashout);
         socket.emit('crash:bet:placed', result);
         safeAck(ack, result);
@@ -85,10 +113,8 @@ export async function initRealtimeSockets(server) {
 
     socket.on('crash:cashout', async (_payload = {}, ack) => {
       try {
-        const currentUser = socket.user || await getSocketUser(socket);
+        const currentUser = socket.user || await attachSocketUser(socket);
         if (!currentUser) throw new Error('Authentication required');
-        socket.user = currentUser;
-        socket.join(`user:${currentUser._id}`);
         const result = await crashEngine.cashout(currentUser._id);
         socket.emit('crash:cashout:success', result);
         safeAck(ack, result);
