@@ -3,6 +3,7 @@ import DepositMethod from '../models/DepositMethod.js';
 import { ensureDefaultDepositMethods } from './depositMethodController.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/appError.js';
+import { groupDepositMethodsByTitle } from '../utils/paymentMethodCanonical.js';
 
 function methodToPlain(method) {
   return method?.toObject ? method.toObject() : method;
@@ -29,6 +30,32 @@ async function getGlobalDepositMethods(activeOnly = false) {
   return DepositMethod.find(filter).sort({ displayOrder: 1, createdAt: 1 });
 }
 
+function buildMethodChannelMap(globalMethods = []) {
+  const map = new Map();
+  const groups = groupDepositMethodsByTitle(globalMethods);
+
+  for (const group of groups) {
+    const hasMultiple = group.methods.length > 1;
+
+    group.methods.forEach((method, index) => {
+      const plain = methodToPlain(method);
+      const channelNumber = index + 1;
+      const channelLabel = hasMultiple ? `Channel ${channelNumber}` : 'Channel 1';
+      const title = plain.title || plain.key;
+
+      map.set(String(plain.key || '').toLowerCase(), {
+        channelNumber,
+        channelLabel,
+        displayTitle: hasMultiple ? `${title} - ${channelLabel}` : title,
+        groupKey: group.canonicalKey,
+        groupSize: group.methods.length,
+      });
+    });
+  }
+
+  return map;
+}
+
 function getAllowedPaymentMethodKeys(agent, globalMethods) {
   const rawAgent = agentToPlain(agent);
   const globalKeys = globalMethods.map((method) => String(method.key || '').toLowerCase()).filter(Boolean);
@@ -41,6 +68,7 @@ function getAllowedPaymentMethodKeys(agent, globalMethods) {
 }
 
 function syncAgentPaymentMethods(agent, globalMethods) {
+  const channelMap = buildMethodChannelMap(globalMethods);
   const existing = new Map(
     (agent.paymentMethods || []).map((method) => {
       const plain = methodToPlain(method);
@@ -51,14 +79,19 @@ function syncAgentPaymentMethods(agent, globalMethods) {
   agent.paymentMethods = globalMethods.map((method) => {
     const plain = methodToPlain(method);
     const old = existing.get(plain.key) || {};
+    const channel = channelMap.get(String(plain.key || '').toLowerCase()) || {};
+    const legacyActive = old.isActive === undefined ? true : Boolean(old.isActive);
 
     return {
       key: plain.key,
       title: plain.title,
       number: old.number || '',
-      image: '',
+      image: old.image || '',
       note: old.note || '',
-      isActive: old.isActive === undefined ? true : Boolean(old.isActive),
+      channelLabel: old.channelLabel || channel.channelLabel || '',
+      depositEnabled: old.depositEnabled === undefined ? legacyActive : Boolean(old.depositEnabled),
+      withdrawEnabled: old.withdrawEnabled === undefined ? legacyActive : Boolean(old.withdrawEnabled),
+      isActive: legacyActive,
       updatedAt: old.updatedAt,
     };
   });
@@ -67,6 +100,7 @@ function syncAgentPaymentMethods(agent, globalMethods) {
 }
 
 function buildAccessPayload(agent, globalMethods) {
+  const channelMap = buildMethodChannelMap(globalMethods);
   const allowedKeys = getAllowedPaymentMethodKeys(agent, globalMethods);
   const allowedSet = new Set(allowedKeys);
   const paymentByKey = new Map((agent.paymentMethods || []).map((method) => {
@@ -77,12 +111,19 @@ function buildAccessPayload(agent, globalMethods) {
   const depositMethods = globalMethods.map((method) => {
     const plain = methodToPlain(method);
     const saved = paymentByKey.get(plain.key) || {};
+    const channel = channelMap.get(String(plain.key || '').toLowerCase()) || {};
+    const legacyActive = saved.isActive === undefined ? true : Boolean(saved.isActive);
 
     return {
       key: plain.key,
       title: plain.title,
+      displayTitle: channel.displayTitle || plain.title,
+      channelLabel: saved.channelLabel || channel.channelLabel || '',
+      channelNumber: channel.channelNumber || 1,
+      groupKey: channel.groupKey || plain.key,
+      groupSize: channel.groupSize || 1,
       category: plain.category || 'e-wallets',
-      image: plain.image || '',
+      image: plain.image || saved.image || '',
       minAmount: plain.minAmount || 100,
       maxAmount: plain.maxAmount || 25000,
       displayOrder: plain.displayOrder || 100,
@@ -91,7 +132,10 @@ function buildAccessPayload(agent, globalMethods) {
       agentPayment: {
         number: saved.number || '',
         note: saved.note || '',
-        isActive: saved.isActive === undefined ? true : Boolean(saved.isActive),
+        channelLabel: saved.channelLabel || channel.channelLabel || '',
+        depositEnabled: saved.depositEnabled === undefined ? legacyActive : Boolean(saved.depositEnabled),
+        withdrawEnabled: saved.withdrawEnabled === undefined ? legacyActive : Boolean(saved.withdrawEnabled),
+        isActive: legacyActive,
         updatedAt: saved.updatedAt,
       },
     };
@@ -155,7 +199,7 @@ export const updateAgentPaymentMethodAccess = asyncHandler(async (req, res) => {
 export const getAgentPaymentMethods = getAgentPaymentMethodAccess;
 
 // Backward-compatible admin update route. Main Admin can still update a number if an old UI calls this,
-// but the Agent Admin panel remains the normal place for number/note updates.
+// but the Agent Admin panel remains the normal place for number/note/channel updates.
 export const updateAgentPaymentMethod = asyncHandler(async (req, res) => {
   const { agentId, methodKey } = req.params;
   const agent = await findAgentByAgentId(agentId);
@@ -174,6 +218,8 @@ export const updateAgentPaymentMethod = asyncHandler(async (req, res) => {
 
   method.number = String(req.body.number || '').trim();
   method.note = String(req.body.note || '').trim();
+  method.depositEnabled = req.body.depositEnabled === undefined ? method.depositEnabled !== false : (req.body.depositEnabled === true || String(req.body.depositEnabled) === 'true');
+  method.withdrawEnabled = req.body.withdrawEnabled === undefined ? method.withdrawEnabled !== false : (req.body.withdrawEnabled === true || String(req.body.withdrawEnabled) === 'true');
   method.isActive = req.body.isActive === true || String(req.body.isActive) === 'true';
   method.updatedAt = new Date();
 

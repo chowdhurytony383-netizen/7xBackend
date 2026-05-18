@@ -146,7 +146,34 @@ async function getGlobalDepositMethods(activeOnly = true) {
   return DepositMethod.find(filter).sort({ displayOrder: 1, createdAt: 1 });
 }
 
+function buildPaymentMethodChannelMap(globalMethods = []) {
+  const map = new Map();
+  const groups = groupDepositMethodsByTitle(globalMethods);
+
+  for (const group of groups) {
+    const hasMultiple = group.methods.length > 1;
+
+    group.methods.forEach((method, index) => {
+      const plain = method?.toObject ? method.toObject() : method;
+      const channelNumber = index + 1;
+      const channelLabel = hasMultiple ? `Channel ${channelNumber}` : 'Channel 1';
+      const title = plain.title || plain.key;
+
+      map.set(String(plain.key || '').toLowerCase(), {
+        channelNumber,
+        channelLabel,
+        displayTitle: hasMultiple ? `${title} - ${channelLabel}` : title,
+        groupKey: group.canonicalKey,
+        groupSize: group.methods.length,
+      });
+    });
+  }
+
+  return map;
+}
+
 function normalizeAgentPaymentMethods(agent, globalMethods) {
+  const channelMap = buildPaymentMethodChannelMap(globalMethods);
   const existing = new Map(
     (agent.paymentMethods || []).map((method) => {
       const plain = method.toObject ? method.toObject() : method;
@@ -158,14 +185,24 @@ function normalizeAgentPaymentMethods(agent, globalMethods) {
     const plainMethod = method.toObject ? method.toObject() : method;
     const saved = existing.get(plainMethod.key) || {};
 
+    const channel = channelMap.get(String(plainMethod.key || '').toLowerCase()) || {};
+    const legacyActive = saved.isActive === undefined ? true : Boolean(saved.isActive);
+
     return {
       key: plainMethod.key,
       title: plainMethod.title,
+      displayTitle: channel.displayTitle || plainMethod.title,
+      channelLabel: saved.channelLabel || channel.channelLabel || '',
+      channelNumber: channel.channelNumber || 1,
+      groupKey: channel.groupKey || plainMethod.key,
+      groupSize: channel.groupSize || 1,
       category: plainMethod.category || 'e-wallets',
       image: plainMethod.image || '',
       number: saved.number || '',
       note: saved.note || '',
-      isActive: saved.isActive === undefined ? true : Boolean(saved.isActive),
+      depositEnabled: saved.depositEnabled === undefined ? legacyActive : Boolean(saved.depositEnabled),
+      withdrawEnabled: saved.withdrawEnabled === undefined ? legacyActive : Boolean(saved.withdrawEnabled),
+      isActive: legacyActive,
       minAmount: plainMethod.minAmount || 100,
       maxAmount: plainMethod.maxAmount || 25000,
       displayOrder: plainMethod.displayOrder || 100,
@@ -293,7 +330,7 @@ export const getAgentDepositOptions = asyncHandler(async (req, res) => {
         if (!isPaymentMethodAssignedToAgent(agent, method.key, globalMethods)) continue;
 
         const methods = normalizeAgentPaymentMethods(agent, globalMethods);
-        const payment = methods.find((item) => item.key === method.key && item.isActive && item.number);
+        const payment = methods.find((item) => item.key === method.key && item.isActive && item.depositEnabled !== false && item.number);
 
         if (!payment) continue;
 
@@ -359,7 +396,7 @@ export const getAgentWithdrawOptions = asyncHandler(async (req, res) => {
         if (!isPaymentMethodAssignedToAgent(agent, method.key, globalMethods)) continue;
 
         const methods = normalizeAgentPaymentMethods(agent, globalMethods);
-        const payment = methods.find((item) => item.key === method.key && item.isActive);
+        const payment = methods.find((item) => item.key === method.key && item.isActive && item.withdrawEnabled !== false);
 
         if (!payment) continue;
 
@@ -430,8 +467,8 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
     403
   );
 
-  const method = normalizeAgentPaymentMethods(agent, globalMethods).find((item) => item.key === methodKey && item.isActive && item.number);
-  assertOrThrow(method, 'Agent payment number is not active', 404);
+  const method = normalizeAgentPaymentMethods(agent, globalMethods).find((item) => item.key === methodKey && item.isActive && item.depositEnabled !== false && item.number);
+  assertOrThrow(method, 'Agent payment deposit channel is not active', 404);
 
   const userNoteParts = [];
   if (payerNumber) userNoteParts.push(`Sender wallet number: ${payerNumber}`);
@@ -452,7 +489,9 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
     gatewayPayload: {
       paymentMethod: {
         key: method.key,
-        title: globalMethod.title,
+        title: method.displayTitle || globalMethod.title,
+        baseTitle: globalMethod.title,
+        channelLabel: method.channelLabel || '',
         number: method.number,
         note: method.note,
         image: globalMethod.image,
@@ -473,7 +512,8 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
     agentId: agent.agentId,
     amount,
     methodKey: method.key,
-    methodTitle: globalMethod.title,
+    methodTitle: method.displayTitle || globalMethod.title,
+    channelLabel: method.channelLabel || '',
     methodNumber: method.number,
     userNote,
     payerNumber,
@@ -531,12 +571,14 @@ export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
     403
   );
 
-  const method = normalizeAgentPaymentMethods(agent, globalMethods).find((item) => item.key === methodKey && item.isActive) || {
+  const method = normalizeAgentPaymentMethods(agent, globalMethods).find((item) => item.key === methodKey && item.isActive && item.withdrawEnabled !== false) || {
     key: methodKey,
     title: globalMethod.title,
+    displayTitle: globalMethod.title,
+    channelLabel: '',
     number: '',
   };
-  assertOrThrow(method?.isActive !== false, 'Selected withdrawal method is not active for this agent', 404);
+  assertOrThrow(method?.isActive !== false && method?.withdrawEnabled !== false, 'Selected withdrawal channel is not active for this agent', 404);
 
   const userNoteParts = [];
   userNoteParts.push(`Receiving account: ${receiverNumber}`);
@@ -569,7 +611,9 @@ export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
         walletHeldAt: new Date(),
         paymentMethod: {
           key: method.key,
-          title: globalMethod.title || method.title,
+          title: method.displayTitle || globalMethod.title || method.title,
+          baseTitle: globalMethod.title || method.title,
+          channelLabel: method.channelLabel || '',
           image: globalMethod.image,
         },
         payout: {
@@ -590,7 +634,8 @@ export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
       agentId: agent.agentId,
       amount,
       methodKey: method.key,
-      methodTitle: globalMethod.title || method.title,
+      methodTitle: method.displayTitle || globalMethod.title || method.title,
+      channelLabel: method.channelLabel || '',
       methodNumber: '',
       userNote,
       receiverNumber,

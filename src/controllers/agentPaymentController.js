@@ -4,6 +4,7 @@ import { ensureDefaultDepositMethods } from './depositMethodController.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/appError.js';
 import { saveUploadedFile } from '../utils/cloudinary.js';
+import { groupDepositMethodsByTitle } from '../utils/paymentMethodCanonical.js';
 
 function methodToPlain(method) {
   return method?.toObject ? method.toObject() : method;
@@ -14,6 +15,32 @@ async function getGlobalDepositMethods(activeOnly = false) {
 
   const filter = activeOnly ? { isActive: true } : {};
   return DepositMethod.find(filter).sort({ displayOrder: 1, createdAt: 1 });
+}
+
+function buildMethodChannelMap(globalMethods = []) {
+  const map = new Map();
+  const groups = groupDepositMethodsByTitle(globalMethods);
+
+  for (const group of groups) {
+    const hasMultiple = group.methods.length > 1;
+
+    group.methods.forEach((method, index) => {
+      const plain = methodToPlain(method);
+      const channelNumber = index + 1;
+      const channelLabel = hasMultiple ? `Channel ${channelNumber}` : 'Channel 1';
+      const title = plain.title || plain.key;
+
+      map.set(String(plain.key || '').toLowerCase(), {
+        channelNumber,
+        channelLabel,
+        displayTitle: hasMultiple ? `${title} - ${channelLabel}` : title,
+        groupKey: group.canonicalKey,
+        groupSize: group.methods.length,
+      });
+    });
+  }
+
+  return map;
 }
 
 function getRawAgent(agent) {
@@ -49,6 +76,7 @@ export function isPaymentMethodAssignedToAgent(agent, methodKey, globalMethods) 
 }
 
 function syncAgentPaymentMethods(agent, globalMethods) {
+  const channelMap = buildMethodChannelMap(globalMethods);
   const existing = new Map(
     (agent.paymentMethods || []).map((method) => {
       const plain = methodToPlain(method);
@@ -59,6 +87,8 @@ function syncAgentPaymentMethods(agent, globalMethods) {
   agent.paymentMethods = globalMethods.map((method) => {
     const plain = methodToPlain(method);
     const old = existing.get(plain.key) || {};
+    const channel = channelMap.get(String(plain.key || '').toLowerCase()) || {};
+    const legacyActive = old.isActive === undefined ? true : Boolean(old.isActive);
 
     return {
       key: plain.key,
@@ -66,7 +96,10 @@ function syncAgentPaymentMethods(agent, globalMethods) {
       number: old.number || '',
       image: old.image || '',
       note: old.note || '',
-      isActive: old.isActive === undefined ? true : Boolean(old.isActive),
+      channelLabel: old.channelLabel || channel.channelLabel || '',
+      depositEnabled: old.depositEnabled === undefined ? legacyActive : Boolean(old.depositEnabled),
+      withdrawEnabled: old.withdrawEnabled === undefined ? legacyActive : Boolean(old.withdrawEnabled),
+      isActive: legacyActive,
       updatedAt: old.updatedAt,
     };
   });
@@ -76,6 +109,7 @@ function syncAgentPaymentMethods(agent, globalMethods) {
 
 function publicAgentPaymentPayload(agent, globalMethods, activeOnly = false) {
   const byKey = new Map(globalMethods.map((method) => [method.key, methodToPlain(method)]));
+  const channelMap = buildMethodChannelMap(globalMethods);
   const allowedKeys = new Set(getAllowedPaymentMethodKeys(agent, globalMethods));
   syncAgentPaymentMethods(agent, globalMethods);
 
@@ -85,10 +119,18 @@ function publicAgentPaymentPayload(agent, globalMethods, activeOnly = false) {
     .map((method) => {
       const plain = methodToPlain(method);
       const global = byKey.get(plain.key) || {};
+      const channel = channelMap.get(String(plain.key || '').toLowerCase()) || {};
 
       return {
         ...plain,
         title: global.title || plain.title,
+        displayTitle: channel.displayTitle || global.title || plain.title,
+        channelLabel: plain.channelLabel || channel.channelLabel || '',
+        channelNumber: channel.channelNumber || 1,
+        groupKey: channel.groupKey || plain.key,
+        groupSize: channel.groupSize || 1,
+        depositEnabled: plain.depositEnabled !== false,
+        withdrawEnabled: plain.withdrawEnabled !== false,
         image: global.image || plain.image || '',
         category: global.category || 'e-wallets',
         minAmount: global.minAmount || 100,
@@ -141,6 +183,8 @@ export const updateMyPaymentMethod = asyncHandler(async (req, res) => {
 
   method.number = String(req.body.number || '').trim();
   method.note = String(req.body.note || '').trim();
+  method.depositEnabled = req.body.depositEnabled === true || String(req.body.depositEnabled) === 'true';
+  method.withdrawEnabled = req.body.withdrawEnabled === true || String(req.body.withdrawEnabled) === 'true';
 
   if (req.file) {
     const imageUrl = await saveUploadedFile(req.file, {
@@ -160,7 +204,7 @@ export const updateMyPaymentMethod = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    message: `${method.title} payment details updated`,
+    message: `${method.title} payment channel updated`,
     data: method,
   });
 });
