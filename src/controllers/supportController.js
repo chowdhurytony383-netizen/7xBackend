@@ -1,10 +1,8 @@
-import path from 'path';
 import SupportMessage from '../models/SupportMessage.js';
 import SupportTicket from '../models/SupportTicket.js';
 import { AppError } from '../utils/appError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { saveUploadedFile } from '../utils/cloudinary.js';
-import { addSupportMessage } from '../services/supportService.js';
+import { addSupportMessage, getTicketWithUser } from '../services/supportService.js';
 
 const allowedCategories = new Set(['general', 'deposit', 'withdraw', 'bonus', 'game', 'affiliate', 'account', 'technical', 'other']);
 const allowedPriorities = new Set(['low', 'normal', 'high', 'urgent']);
@@ -12,55 +10,6 @@ const allowedStatuses = new Set(['open', 'pending', 'resolved', 'closed']);
 
 function sanitizeText(value, max = 2000) {
   return String(value || '').trim().slice(0, max);
-}
-
-function flattenUploadedFiles(files) {
-  if (!files) return [];
-  if (Array.isArray(files)) return files;
-  return Object.values(files).flat().filter(Boolean);
-}
-
-function safeFileName(value = 'support-file') {
-  return String(value || 'support-file')
-    .replace(/\.[a-z0-9]+$/i, '')
-    .replace(/[^a-z0-9_-]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'support-file';
-}
-
-async function buildSupportAttachments(req) {
-  const files = flattenUploadedFiles(req.files).slice(0, 5);
-  if (!files.length) return [];
-
-  const attachments = [];
-  for (const file of files) {
-    const url = await saveUploadedFile(file, {
-      req,
-      localSubDir: 'support',
-      cloudinaryFolder: '7xbet/support',
-      publicIdPrefix: `support-${safeFileName(file.originalname)}`,
-      resourceType: 'auto',
-    });
-
-    const originalName = file.originalname || 'attachment';
-    attachments.push({
-      name: path.basename(originalName),
-      originalName,
-      url,
-      type: file.mimetype || '',
-      mimeType: file.mimetype || '',
-      size: Number(file.size || 0),
-      isImage: String(file.mimetype || '').startsWith('image/'),
-    });
-  }
-
-  return attachments;
-}
-
-function requireMessageOrAttachment(message, attachments) {
-  if (!message && !attachments.length) {
-    throw new AppError('Message or attachment is required', 400);
-  }
 }
 
 export const listMySupportTickets = asyncHandler(async (req, res) => {
@@ -75,12 +24,9 @@ export const createSupportTicket = asyncHandler(async (req, res) => {
   const message = sanitizeText(req.body?.message, 4000);
   const category = allowedCategories.has(req.body?.category) ? req.body.category : 'general';
   const priority = allowedPriorities.has(req.body?.priority) ? req.body.priority : 'normal';
-  const attachments = await buildSupportAttachments(req);
 
   if (!subject) throw new AppError('Subject is required', 400);
-  requireMessageOrAttachment(message, attachments);
-
-  const preview = message || (attachments.length === 1 ? `Attachment: ${attachments[0].originalName || attachments[0].name}` : `${attachments.length} attachments sent`);
+  if (!message) throw new AppError('Message is required', 400);
 
   const ticket = await SupportTicket.create({
     user: req.user._id,
@@ -88,13 +34,13 @@ export const createSupportTicket = asyncHandler(async (req, res) => {
     category,
     priority,
     status: 'open',
-    lastMessage: preview.slice(0, 300),
+    lastMessage: message.slice(0, 300),
     lastMessageAt: new Date(),
     lastMessageBy: 'user',
     unreadForAdmin: 1,
   });
 
-  const result = await addSupportMessage({ ticket, sender: req.user, senderRole: 'user', message, attachments });
+  const result = await addSupportMessage({ ticket, sender: req.user, senderRole: 'user', message });
   res.status(201).json({ success: true, data: result.ticket });
 });
 
@@ -114,14 +60,13 @@ export const getMySupportTicket = asyncHandler(async (req, res) => {
 
 export const sendMySupportMessage = asyncHandler(async (req, res) => {
   const message = sanitizeText(req.body?.message, 4000);
-  const attachments = await buildSupportAttachments(req);
-  requireMessageOrAttachment(message, attachments);
+  if (!message) throw new AppError('Message is required', 400);
 
   const ticket = await SupportTicket.findOne({ _id: req.params.ticketId, user: req.user._id });
   if (!ticket) throw new AppError('Support ticket not found', 404);
   if (ticket.status === 'closed') ticket.status = 'open';
 
-  const result = await addSupportMessage({ ticket, sender: req.user, senderRole: 'user', message, attachments });
+  const result = await addSupportMessage({ ticket, sender: req.user, senderRole: 'user', message });
   res.status(201).json({ success: true, data: result });
 });
 
@@ -144,11 +89,10 @@ export const adminListSupportTickets = asyncHandler(async (req, res) => {
 
   const search = sanitizeText(req.query.q, 100);
   if (search) {
-    const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     query.$or = [
-      { ticketNo: new RegExp(safeSearch, 'i') },
-      { subject: new RegExp(safeSearch, 'i') },
-      { lastMessage: new RegExp(safeSearch, 'i') },
+      { ticketNo: new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+      { subject: new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+      { lastMessage: new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
     ];
   }
 
@@ -178,8 +122,7 @@ export const adminGetSupportTicket = asyncHandler(async (req, res) => {
 
 export const adminSendSupportMessage = asyncHandler(async (req, res) => {
   const message = sanitizeText(req.body?.message, 4000);
-  const attachments = await buildSupportAttachments(req);
-  requireMessageOrAttachment(message, attachments);
+  if (!message) throw new AppError('Message is required', 400);
 
   const ticket = await SupportTicket.findById(req.params.ticketId);
   if (!ticket) throw new AppError('Support ticket not found', 404);
@@ -187,7 +130,7 @@ export const adminSendSupportMessage = asyncHandler(async (req, res) => {
   if (req.body?.status && allowedStatuses.has(req.body.status)) ticket.status = req.body.status;
   else if (ticket.status === 'open') ticket.status = 'pending';
 
-  const result = await addSupportMessage({ ticket, sender: req.user, senderRole: 'admin', message, attachments });
+  const result = await addSupportMessage({ ticket, sender: req.user, senderRole: 'admin', message });
   res.status(201).json({ success: true, data: result });
 });
 
