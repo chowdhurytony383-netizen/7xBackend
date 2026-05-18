@@ -109,6 +109,18 @@ const agentSchema = new mongoose.Schema({
           type: String,
           default: '',
         },
+        channelLabel: {
+          type: String,
+          default: '',
+        },
+        depositEnabled: {
+          type: Boolean,
+          default: true,
+        },
+        withdrawEnabled: {
+          type: Boolean,
+          default: true,
+        },
         isActive: {
           type: Boolean,
           default: true,

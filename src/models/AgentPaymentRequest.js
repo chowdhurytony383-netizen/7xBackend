@@ -53,6 +53,10 @@ const agentPaymentRequestSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  channelLabel: {
+    type: String,
+    default: '',
+  },
   methodNumber: {
     type: String,
     default: '',
