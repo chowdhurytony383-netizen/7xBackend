@@ -7,15 +7,14 @@ import {
   updateMySupportTicketStatus,
 } from '../controllers/supportController.js';
 import { protect } from '../middleware/auth.js';
-import { supportAttachmentUpload } from '../middleware/upload.js';
 
 const router = express.Router();
 router.use(protect);
 
 router.get('/', listMySupportTickets);
-router.post('/', supportAttachmentUpload, createSupportTicket);
+router.post('/', createSupportTicket);
 router.get('/:ticketId', getMySupportTicket);
-router.post('/:ticketId/messages', supportAttachmentUpload, sendMySupportMessage);
+router.post('/:ticketId/messages', sendMySupportMessage);
 router.patch('/:ticketId/status', updateMySupportTicketStatus);
 
 export default router;
