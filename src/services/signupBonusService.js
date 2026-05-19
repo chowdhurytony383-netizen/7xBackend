@@ -2,7 +2,7 @@ import Transaction from '../models/Transaction.js';
 import TurnoverRequirement from '../models/TurnoverRequirement.js';
 import User from '../models/User.js';
 import { env } from '../config/env.js';
-import { creditWallet } from '../utils/wallet.js';
+import { creditWallet, debitWallet } from '../utils/wallet.js';
 
 export const SIGNUP_BONUS_CODE = 'SIGNUP_100_EQUIVALENT';
 export const SIGNUP_BONUS_SOURCE = 'signup-bonus';
@@ -348,7 +348,7 @@ export async function getSignupBonusSummary(userId) {
     title: 'New account signup bonus',
     awarded,
     rejected: ['CANCELLED', 'REJECTED'].includes(status),
-    canReject: false,
+    canReject: awarded && remainingTurnover > 0,
     amount: awarded ? originalAmount : 0,
     originalAmount,
     currency: bonusTransaction?.currency || '',
@@ -361,5 +361,100 @@ export async function getSignupBonusSummary(userId) {
     turnoverMultiplier: bonusTransaction?.gatewayPayload?.turnoverMultiplier || getSignupBonusTurnoverMultiplier(),
     createdAt: bonusTransaction?.createdAt || null,
     updatedAt: bonusTransaction?.updatedAt || null,
+  };
+}
+
+
+export async function rejectSignupBonusForUser(userId) {
+  const bonusTransaction = await Transaction.findOne({
+    user: userId,
+    type: 'BONUS',
+    'gatewayPayload.bonusCode': SIGNUP_BONUS_CODE,
+    status: 'SUCCESS',
+  }).sort({ createdAt: -1 });
+
+  if (!bonusTransaction) {
+    return { rejected: false, reason: 'active_bonus_not_found' };
+  }
+
+  const bonusAmount = money(bonusTransaction.amount);
+  if (bonusAmount <= 0) {
+    return { rejected: false, reason: 'empty_bonus_amount' };
+  }
+
+  const user = await User.findById(userId);
+  if (!user) return { rejected: false, reason: 'user_not_found' };
+
+  if (Number(user.wallet || 0) < bonusAmount) {
+    return {
+      rejected: false,
+      reason: 'insufficient_wallet_to_remove_bonus',
+      message: `You need at least ${bonusAmount} ${bonusTransaction.currency || user.currency || ''} in wallet to reject this signup bonus.`,
+      wallet: money(user.wallet),
+      requiredWallet: bonusAmount,
+    };
+  }
+
+  const updatedUser = await debitWallet(userId, bonusAmount, 'signup-bonus-reject');
+
+  const cancelledTurnovers = await TurnoverRequirement.updateMany(
+    {
+      user: userId,
+      type: 'bonus',
+      status: 'open',
+      remaining: { $gt: 0 },
+      $or: [
+        { sourceRef: bonusTransaction._id },
+        { 'meta.bonusCode': SIGNUP_BONUS_CODE },
+        { source: SIGNUP_BONUS_SOURCE },
+      ],
+    },
+    {
+      $set: {
+        status: 'cancelled',
+        remaining: 0,
+        completedAt: new Date(),
+        'meta.rejectedByUser': true,
+        'meta.rejectedAt': new Date(),
+      },
+    }
+  );
+
+  bonusTransaction.status = 'CANCELLED';
+  bonusTransaction.processedAt = new Date();
+  bonusTransaction.userNote = 'Signup bonus rejected by user. Bonus amount removed and turnover cancelled.';
+  bonusTransaction.gatewayPayload = {
+    ...(bonusTransaction.gatewayPayload || {}),
+    rejectedByUser: true,
+    rejectedAt: new Date(),
+    cancelledTurnoverCount: cancelledTurnovers.modifiedCount || 0,
+  };
+  await bonusTransaction.save();
+
+  await User.updateOne(
+    { _id: userId },
+    {
+      $set: {
+        signupBonusRejected: true,
+        signupBonusRejectedAt: new Date(),
+        signupBonusAwarded: false,
+        signupBonusAmount: 0,
+      },
+      $unset: {
+        signupBonusSourceTransaction: '',
+      },
+    }
+  ).catch(() => null);
+
+  const summary = await getSignupBonusSummary(userId);
+
+  return {
+    rejected: true,
+    reason: 'rejected',
+    amountRemoved: bonusAmount,
+    transactionId: bonusTransaction._id,
+    cancelledTurnoverCount: cancelledTurnovers.modifiedCount || 0,
+    summary,
+    user: updatedUser,
   };
 }
