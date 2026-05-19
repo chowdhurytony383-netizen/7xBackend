@@ -2,6 +2,10 @@ import User from '../models/User.js';
 import Verification from '../models/Verification.js';
 import Transaction from '../models/Transaction.js';
 import Bet from '../models/Bet.js';
+import CrashBet from '../models/CrashBet.js';
+import SportsAutoBet from '../models/SportsAutoBet.js';
+import JiliTransaction from '../models/JiliTransaction.js';
+import ProviderWalletTxn from '../models/ProviderWalletTxn.js';
 import Game from '../models/Game.js';
 import Agent from '../models/Agent.js';
 import AgentPaymentRequest from '../models/AgentPaymentRequest.js';
@@ -14,6 +18,205 @@ import { sanitizeUser } from '../utils/sanitize.js';
 import { safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
 import { handleSuccessfulDepositForReferral } from '../services/referralRewardService.js';
 
+
+
+function asPlain(record) {
+  if (!record) return {};
+  return typeof record.toObject === 'function' ? record.toObject() : record;
+}
+
+function roundMoney(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round(number * 100) / 100;
+}
+
+function pickCurrency(record, user) {
+  return String(record?.currency || user?.currency || 'BDT').toUpperCase();
+}
+
+function pickGameTitle(record, fallback = 'Game') {
+  if (!record) return fallback;
+  if (record.game?.displayName) return record.game.displayName;
+  if (record.game?.name) return record.game.name;
+  if (record.gameName) return record.gameName;
+  if (record.sportTitle || record.league) return [record.sportTitle, record.league].filter(Boolean).join(' / ');
+  if (record.homeTeam || record.awayTeam) return [record.homeTeam, record.awayTeam].filter(Boolean).join(' vs ');
+  if (record.game) return `JILI Game #${record.game}`;
+  if (record.slot !== undefined && record.slot !== null) return `Provider slot ${record.slot}`;
+  return fallback;
+}
+
+function resultFromNet(netAmount, status = '') {
+  const normalized = String(status || '').toUpperCase();
+  if (['CANCELLED', 'VOID', 'REFUNDED', 'ROLLBACK'].includes(normalized)) return 'VOID';
+  if (['ACTIVE', 'OPEN', 'PENDING', 'PROCESSING'].includes(normalized)) return 'PENDING';
+  if (roundMoney(netAmount) > 0) return 'WIN';
+  if (roundMoney(netAmount) < 0) return 'LOSS';
+  if (['WIN', 'WON', 'CASHED_OUT'].includes(normalized)) return 'WIN';
+  if (['LOSE', 'LOST'].includes(normalized)) return 'LOSS';
+  return 'DRAW';
+}
+
+function normalizeClassicBet(record, user) {
+  const bet = asPlain(record);
+  const betAmount = roundMoney(bet.betAmount);
+  const winAmount = roundMoney(bet.winAmount);
+  const netAmount = roundMoney(winAmount - betAmount);
+  return {
+    id: String(bet._id || bet.id || ''),
+    source: 'Internal Game',
+    gameType: 'Casino/Internal',
+    gameTitle: pickGameTitle(bet, 'Internal game'),
+    roundId: bet.gameData?.roundId || bet.gameData?.round || '',
+    betId: String(bet._id || bet.id || ''),
+    betAmount,
+    winAmount,
+    netAmount,
+    result: bet.isWin ? 'WIN' : resultFromNet(netAmount, bet.status),
+    status: bet.status || (bet.isWin ? 'WIN' : 'LOSE'),
+    currency: pickCurrency(bet, user),
+    createdAt: bet.createdAt,
+    details: bet.gameData || {},
+  };
+}
+
+function normalizeCrashBet(record, user) {
+  const bet = asPlain(record);
+  const betAmount = roundMoney(bet.amount);
+  const winAmount = roundMoney(bet.payoutAmount);
+  const netAmount = roundMoney(winAmount - betAmount);
+  return {
+    id: String(bet._id || bet.id || ''),
+    source: 'Crash',
+    gameType: 'Crash',
+    gameTitle: `Crash round ${bet.roundId || ''}`.trim(),
+    roundId: bet.roundId || '',
+    betId: String(bet._id || bet.id || ''),
+    betAmount,
+    winAmount,
+    netAmount,
+    result: resultFromNet(netAmount, bet.status),
+    status: bet.status || '—',
+    currency: pickCurrency(bet, user),
+    multiplier: bet.payoutMultiplier || bet.crashMultiplier || 0,
+    createdAt: bet.createdAt,
+    details: {
+      autoCashout: bet.autoCashout,
+      payoutMultiplier: bet.payoutMultiplier,
+      crashMultiplier: bet.crashMultiplier,
+    },
+  };
+}
+
+function normalizeSportsBet(record, user) {
+  const bet = asPlain(record);
+  const betAmount = roundMoney(bet.stake);
+  const winAmount = roundMoney(bet.payoutAmount);
+  const netAmount = roundMoney(winAmount - betAmount);
+  return {
+    id: String(bet._id || bet.id || bet.betId || ''),
+    source: 'Sports',
+    gameType: bet.sportTitle || 'Sports betting',
+    gameTitle: [bet.homeTeam, bet.awayTeam].filter(Boolean).join(' vs ') || bet.league || bet.sportTitle || 'Sports bet',
+    market: bet.marketName || bet.marketKey || '',
+    selection: bet.selectionName || '',
+    odds: bet.odds || 0,
+    roundId: bet.providerEventId || '',
+    betId: bet.betId || String(bet._id || bet.id || ''),
+    betAmount,
+    winAmount,
+    netAmount,
+    result: resultFromNet(netAmount, bet.status),
+    status: bet.status || 'OPEN',
+    currency: pickCurrency(bet, user),
+    createdAt: bet.createdAt,
+    settledAt: bet.settledAt,
+    details: bet.result || {},
+  };
+}
+
+function normalizeJiliTransaction(record, user) {
+  const txn = asPlain(record);
+  const betAmount = roundMoney(txn.betAmount || txn.turnoverAmount || 0);
+  const winAmount = roundMoney(txn.winloseAmount || 0);
+  const netAmount = roundMoney(txn.walletDelta ?? (winAmount - betAmount));
+  return {
+    id: String(txn._id || txn.id || txn.txId || ''),
+    source: 'JILI',
+    gameType: txn.action === 'sessionBet' ? 'JILI Session' : 'JILI Game',
+    gameTitle: txn.game ? `JILI Game #${txn.game}` : 'JILI game',
+    action: txn.action || '',
+    roundId: txn.round || txn.originalRound || '',
+    sessionId: txn.sessionId || '',
+    betId: txn.txId || txn.reqId || '',
+    betAmount,
+    winAmount,
+    netAmount,
+    result: resultFromNet(netAmount, txn.status),
+    status: txn.status || 'accepted',
+    currency: pickCurrency(txn, user),
+    createdAt: txn.createdAt,
+    details: {
+      reqId: txn.reqId,
+      action: txn.action,
+      turnoverAmount: txn.turnoverAmount,
+      walletDelta: txn.walletDelta,
+      message: txn.message,
+    },
+  };
+}
+
+function normalizeProviderWalletTxn(record, user) {
+  const txn = asPlain(record);
+  const amount = roundMoney(Number(txn.amountCents || 0) / 100);
+  const isDebit = txn.type === 'debit';
+  const isRollback = txn.type === 'rollback';
+  const betAmount = isDebit ? amount : 0;
+  const winAmount = isDebit ? 0 : amount;
+  const netAmount = roundMoney(isDebit ? -amount : amount);
+  return {
+    id: String(txn._id || txn.id || txn.txnId || ''),
+    source: 'Provider Wallet',
+    gameType: 'Provider wallet',
+    gameTitle: pickGameTitle(txn, 'Provider wallet game'),
+    action: txn.type || '',
+    roundId: txn.roundId || '',
+    sessionId: txn.sessionId || '',
+    betId: txn.betId || txn.txnId || '',
+    betAmount,
+    winAmount,
+    netAmount,
+    result: isRollback ? 'VOID' : resultFromNet(netAmount, txn.status),
+    status: txn.status || txn.type || 'success',
+    currency: pickCurrency(txn, user),
+    multiplier: txn.multiplier || 0,
+    createdAt: txn.createdAt,
+    details: txn.response || {},
+  };
+}
+
+function buildGameplaySummary(records = []) {
+  const totals = records.reduce((summary, record) => {
+    summary.totalBetAmount = roundMoney(summary.totalBetAmount + Number(record.betAmount || 0));
+    summary.totalWinAmount = roundMoney(summary.totalWinAmount + Number(record.winAmount || 0));
+    summary.netResult = roundMoney(summary.netResult + Number(record.netAmount || 0));
+    if (record.result === 'WIN') summary.totalWins += 1;
+    if (record.result === 'LOSS') summary.totalLosses += 1;
+    return summary;
+  }, {
+    totalRecords: records.length,
+    totalBetAmount: 0,
+    totalWinAmount: 0,
+    netResult: 0,
+    totalWins: 0,
+    totalLosses: 0,
+  });
+
+  totals.ggr = roundMoney(totals.totalBetAmount - totals.totalWinAmount);
+  totals.winRate = totals.totalRecords ? Math.round((totals.totalWins / totals.totalRecords) * 100) : 0;
+  return totals;
+}
 
 function boolFromBody(value, fallback = true) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -96,12 +299,60 @@ export const users = asyncHandler(async (req, res) => {
 export const userDetails = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.userId);
   assertOrThrow(user, 'User not found', 404);
-  const [verification, bets, transactions] = await Promise.all([
+
+  const providerUserIds = [user._id, user.id, user.userId, user.username]
+    .filter(Boolean)
+    .map((value) => String(value));
+
+  const jiliIdentifiers = [String(user._id), user.userId, user.username, user.userId || user.username || String(user._id)]
+    .filter(Boolean)
+    .map((value) => String(value))
+    .filter((value, index, list) => value.length >= 4 && list.indexOf(value) === index);
+  const jiliUsernamePattern = jiliIdentifiers.length
+    ? new RegExp(`(^|_)(${jiliIdentifiers.map(escapeRegex).join('|')})$`, 'i')
+    : null;
+  const jiliFilter = jiliUsernamePattern
+    ? { $or: [{ user: user._id }, { username: jiliUsernamePattern }] }
+    : { user: user._id };
+
+  const [verification, bets, crashBets, sportsBets, jiliTransactions, providerWalletTxns, transactions] = await Promise.all([
     Verification.findOne({ user: user._id }),
-    Bet.find({ user: user._id }).populate('game', 'name displayName image').sort({ createdAt: -1 }).limit(100),
-    Transaction.find({ user: user._id }).sort({ createdAt: -1 }).limit(100),
+    Bet.find({ user: user._id }).populate('game', 'name displayName image').sort({ createdAt: -1 }).limit(150),
+    CrashBet.find({ user: user._id }).sort({ createdAt: -1 }).limit(150),
+    SportsAutoBet.find({ user: user._id }).sort({ createdAt: -1 }).limit(150),
+    JiliTransaction.find(jiliFilter).sort({ createdAt: -1 }).limit(200),
+    ProviderWalletTxn.find({ userId: { $in: providerUserIds } }).sort({ createdAt: -1 }).limit(200),
+    Transaction.find({ user: user._id }).sort({ createdAt: -1 }).limit(150),
   ]);
-  res.json({ success: true, data: { user: { ...sanitizeUser(user), verification }, verification, bets, transactions } });
+
+  const gameplayRecords = [
+    ...bets.map((item) => normalizeClassicBet(item, user)),
+    ...crashBets.map((item) => normalizeCrashBet(item, user)),
+    ...sportsBets.map((item) => normalizeSportsBet(item, user)),
+    ...jiliTransactions.map((item) => normalizeJiliTransaction(item, user)),
+    ...providerWalletTxns.map((item) => normalizeProviderWalletTxn(item, user)),
+  ]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 500);
+
+  const gameplaySummary = buildGameplaySummary(gameplayRecords);
+
+  res.json({
+    success: true,
+    data: {
+      user: { ...sanitizeUser(user), verification },
+      verification,
+      bets,
+      crashBets,
+      sportsBets,
+      jiliTransactions,
+      providerWalletTxns,
+      gameplayRecords,
+      gameplaySummary,
+      gameplay: { summary: gameplaySummary, records: gameplayRecords },
+      transactions,
+    },
+  });
 });
 
 export const updateUser = asyncHandler(async (req, res) => {
