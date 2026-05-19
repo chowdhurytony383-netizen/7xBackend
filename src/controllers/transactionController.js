@@ -14,6 +14,7 @@ import { groupDepositMethodsByTitle, pickPrimaryDepositMethod } from '../utils/p
 import { assertUserCanDeposit, assertUserCanWithdraw } from '../utils/userPermissions.js';
 import { assertWithdrawalAllowedForUser } from '../services/withdrawalGuardService.js';
 import { getFirstDepositBonusSummary, rejectFirstDepositBonusForUser, safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
+import { getSignupBonusSummary, rejectSignupBonusForUser } from '../services/signupBonusService.js';
 import { handleSuccessfulDepositForReferral } from '../services/referralRewardService.js';
 
 function razorpayClient() {
@@ -22,11 +23,21 @@ function razorpayClient() {
 }
 
 export const getMyTransactions = asyncHandler(async (req, res) => {
-  const [transactions, bonusSummary] = await Promise.all([
+  const [transactions, signupBonusSummary, firstDepositBonusSummary] = await Promise.all([
     Transaction.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(150),
+    getSignupBonusSummary(req.user._id),
     getFirstDepositBonusSummary(req.user._id),
   ]);
-  res.json({ success: true, data: transactions, transactions, bonusSummary });
+
+  res.json({
+    success: true,
+    data: transactions,
+    transactions,
+    signupBonusSummary,
+    firstDepositBonusSummary,
+    // Kept for older frontend builds. The Wallet page uses signupBonusSummary first.
+    bonusSummary: signupBonusSummary,
+  });
 });
 
 export const createWithdrawTransaction = asyncHandler(async (req, res) => {
@@ -58,6 +69,26 @@ export const createWithdrawTransaction = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({ success: true, message: 'Withdrawal request created', transactionId: transaction._id, data: transaction });
+});
+
+export const rejectMySignupBonus = asyncHandler(async (req, res) => {
+  const result = await rejectSignupBonusForUser(req.user._id);
+
+  assertOrThrow(
+    result.rejected,
+    result.message || 'Active signup bonus was not found or cannot be rejected.',
+    result.reason === 'insufficient_wallet_to_remove_bonus' ? 400 : 404,
+    { code: 'SIGNUP_BONUS_REJECT_FAILED', reason: result.reason, wallet: result.wallet, requiredWallet: result.requiredWallet }
+  );
+
+  res.json({
+    success: true,
+    message: 'Signup bonus rejected. Bonus turnover cancelled.',
+    data: result,
+    signupBonusSummary: result.summary,
+    bonusSummary: result.summary,
+    user: result.user?.toSafeObject ? result.user.toSafeObject() : result.user,
+  });
 });
 
 export const rejectMyFirstDepositBonus = asyncHandler(async (req, res) => {
