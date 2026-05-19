@@ -7,12 +7,14 @@ import {
   getAgentWithdrawOptions,
   getMyTransactions,
   rejectMyFirstDepositBonus,
+  rejectMySignupBonus,
 } from '../controllers/transactionController.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.get('/get-all-transaction-by-user-id', protect, getMyTransactions);
+router.post('/reject-signup-bonus', protect, rejectMySignupBonus);
 router.post('/reject-first-deposit-bonus', protect, rejectMyFirstDepositBonus);
 router.get('/agent-deposit-options', protect, getAgentDepositOptions);
 router.get('/agent-withdraw-options', protect, getAgentWithdrawOptions);
