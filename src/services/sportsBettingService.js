@@ -235,7 +235,7 @@ export async function settleOpenSportsBets({ force = false } = {}) {
 
   await SportsSyncLog.create({
     type: 'settlement',
-    provider: 'theoddsapi',
+    provider: String(env.SPORTS_ODDS_PROVIDER || process.env.SPORTS_ODDS_PROVIDER || 'theoddsapi').toLowerCase(),
     status: 'success',
     message: 'Sports auto settlement completed',
     stats,

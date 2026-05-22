@@ -4,6 +4,7 @@ import { env } from '../config/env.js';
 import SportsAutoEvent from '../models/SportsAutoEvent.js';
 import SportsAutoMarket from '../models/SportsAutoMarket.js';
 import SportsSyncLog from '../models/SportsSyncLog.js';
+import { clearApiSportsStaleEvents, syncApiSportsOdds, syncApiSportsScores } from './apiSportsOddsProviderService.js';
 
 const THE_ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const DEFAULT_SPORT_KEYS = [
@@ -85,10 +86,10 @@ function oldEventCutoff() {
   return new Date(Date.now() - hours * 60 * 60 * 1000);
 }
 
-async function deactivateStaleSportsEvents() {
+async function deactivateStaleSportsEvents(provider = 'theoddsapi') {
   const cutoff = oldEventCutoff();
   const staleEvents = await SportsAutoEvent.find({
-    provider: 'theoddsapi',
+    provider,
     isActive: true,
     $or: [
       { completed: true },
@@ -101,11 +102,11 @@ async function deactivateStaleSportsEvents() {
 
   const eventIds = staleEvents.map((event) => event.providerEventId);
   const eventsResult = await SportsAutoEvent.updateMany(
-    { provider: 'theoddsapi', providerEventId: { $in: eventIds } },
+    { provider, providerEventId: { $in: eventIds } },
     { $set: { isActive: false, status: 'FINISHED', lastProviderUpdate: new Date() } }
   );
   const marketsResult = await SportsAutoMarket.updateMany(
-    { provider: 'theoddsapi', providerEventId: { $in: eventIds } },
+    { provider, providerEventId: { $in: eventIds } },
     { $set: { status: 'CLOSED' } }
   );
 
@@ -426,12 +427,21 @@ async function syncTheOddsApiScores() {
   return stats;
 }
 
+function currentSportsProvider() {
+  return String(env.SPORTS_ODDS_PROVIDER || process.env.SPORTS_ODDS_PROVIDER || 'theoddsapi').toLowerCase();
+}
+
+function useApiSportsProvider() {
+  const provider = currentSportsProvider();
+  return provider === 'apisports' || provider === 'api-sports' || provider === 'api_sports';
+}
+
 export async function syncSportsOdds({ force = false } = {}) {
   const ttl = Math.max(5, Number(env.SPORTS_ODDS_SYNC_TTL_SECONDS || 30)) * 1000;
   if (!force && Date.now() - lastOddsSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (oddsSyncPromise) return oddsSyncPromise;
 
-  oddsSyncPromise = syncTheOddsApiOdds()
+  oddsSyncPromise = (useApiSportsProvider() ? syncApiSportsOdds() : syncTheOddsApiOdds())
     .finally(() => {
       lastOddsSyncAt = Date.now();
       oddsSyncPromise = null;
@@ -445,13 +455,17 @@ export async function syncSportsScores({ force = false } = {}) {
   if (!force && Date.now() - lastScoreSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (scoreSyncPromise) return scoreSyncPromise;
 
-  scoreSyncPromise = syncTheOddsApiScores()
+  scoreSyncPromise = (useApiSportsProvider() ? syncApiSportsScores() : syncTheOddsApiScores())
     .finally(() => {
       lastScoreSyncAt = Date.now();
       scoreSyncPromise = null;
     });
 
   return scoreSyncPromise;
+}
+
+export async function clearStaleSportsEvents() {
+  return useApiSportsProvider() ? clearApiSportsStaleEvents() : deactivateStaleSportsEvents('theoddsapi');
 }
 
 export async function syncSportsAll(options = {}) {
