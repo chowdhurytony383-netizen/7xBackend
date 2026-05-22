@@ -46,6 +46,22 @@ function shouldShowAllSportsProviders() {
   return String(process.env.SPORTS_SHOW_ALL_PROVIDERS || '').toLowerCase() === 'true';
 }
 
+function boolEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === '') return fallback;
+  return String(value).toLowerCase() === 'true';
+}
+
+function requireRealOddsForList() {
+  if (process.env.SPORTS_REQUIRE_REAL_ODDS !== undefined) return boolEnv('SPORTS_REQUIRE_REAL_ODDS', true);
+  if (process.env.SPORTS_HIDE_EVENTS_WITHOUT_ODDS !== undefined) return boolEnv('SPORTS_HIDE_EVENTS_WITHOUT_ODDS', true);
+  return boolEnv('SPORTS_USE_PROVIDER_ODDS_ONLY', false) || boolEnv('SPORTS_USE_BOOK_ODDS_ONLY', false);
+}
+
+function hasRealOdds(match = {}) {
+  return match.marketStatus === 'OPEN' && Array.isArray(match.mainOdds) && match.mainOdds.filter((odd) => Number(odd?.price || odd?.odds || odd?.value || 0) > 1).length >= 2;
+}
+
 function shouldSyncOnRequest() {
   const value = process.env.SPORTS_AUTO_SYNC_ON_REQUEST;
   if (value === undefined || value === null || value === '') return true;
@@ -179,12 +195,6 @@ function teamObject(name, sportKey = '') {
 function scoreValue(event, teamName) {
   const found = (event.scores || []).find((score) => String(score.name || '').toLowerCase() === String(teamName || '').toLowerCase());
   return Number(found?.score || 0);
-}
-
-function boolEnv(name, fallback = false) {
-  const value = process.env[name];
-  if (value === undefined || value === null || value === '') return fallback;
-  return String(value).toLowerCase() === 'true';
 }
 
 function stableId(...parts) {
@@ -391,27 +401,51 @@ export const categories = asyncHandler(async (_req, res) => {
   res.json(payload);
 });
 
-export const liveMatches = asyncHandler(async (_req, res) => {
+export const liveMatches = asyncHandler(async (req, res) => {
   maybeAutoSync();
 
   const ttl = cacheTtlMs('SPORTS_RESPONSE_CACHE_SECONDS', 6);
-  if (cacheFresh(liveMatchesCache, ttl)) return res.json({ ...liveMatchesCache.payload, cached: true });
+  const sportQuery = String(req.query?.sport || req.query?.category || req.query?.categoryKey || '').trim().toLowerCase();
+  const cacheKey = sportQuery || 'all';
+  if (cacheFresh(liveMatchesCache, ttl) && liveMatchesCache.cacheKey === cacheKey) return res.json({ ...liveMatchesCache.payload, cached: true });
 
-  const autoEvents = await SportsAutoEvent.find(visibleEventFilter())
+  const extraFilter = {};
+  if (sportQuery) {
+    const regex = new RegExp(sportQuery.replace(/[^a-z0-9]/gi, ''), 'i');
+    extraFilter.$or = [
+      { sportKey: regex },
+      { sportTitle: regex },
+      { league: regex },
+    ];
+  }
+
+  if (requireRealOddsForList()) {
+    const provider = sportsProviderName();
+    const marketFilter = {
+      ...(shouldShowAllSportsProviders() ? {} : { provider }),
+      status: 'OPEN',
+      selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
+    };
+    const marketEventIds = await SportsAutoMarket.distinct('event', marketFilter);
+    extraFilter._id = { $in: marketEventIds };
+  }
+
+  const autoEvents = await SportsAutoEvent.find(visibleEventFilter(extraFilter))
     .sort({ status: 1, commenceTime: 1, updatedAt: -1 })
     .limit(Number(process.env.SPORTS_RESPONSE_MATCH_LIMIT || 80))
     .lean();
 
   if (autoEvents.length) {
-    const matches = await formatAutoEvents(autoEvents);
+    let matches = await formatAutoEvents(autoEvents);
+    if (requireRealOddsForList()) matches = matches.filter(hasRealOdds);
     const payload = { success: true, data: matches, matches, liveMatches: matches, events: matches, cached: false };
-    liveMatchesCache = { createdAt: Date.now(), payload };
+    liveMatchesCache = { createdAt: Date.now(), payload, cacheKey };
     return res.json(payload);
   }
 
   const matches = await SportsMatch.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).limit(50).lean();
   const payload = { success: true, data: matches, matches, liveMatches: matches, events: matches, cached: false };
-  liveMatchesCache = { createdAt: Date.now(), payload };
+  liveMatchesCache = { createdAt: Date.now(), payload, cacheKey };
   res.json(payload);
 });
 
@@ -421,7 +455,18 @@ export const matchOfTheDay = asyncHandler(async (_req, res) => {
   const ttl = cacheTtlMs('SPORTS_RESPONSE_CACHE_SECONDS', 6);
   if (cacheFresh(matchOfTheDayCache, ttl)) return res.json({ ...matchOfTheDayCache.payload, cached: true });
 
-  const event = await SportsAutoEvent.findOne(visibleEventFilter()).sort({ status: 1, commenceTime: 1 }).lean();
+  let eventFilter = visibleEventFilter();
+  if (requireRealOddsForList()) {
+    const provider = sportsProviderName();
+    const marketEventIds = await SportsAutoMarket.distinct('event', {
+      ...(shouldShowAllSportsProviders() ? {} : { provider }),
+      status: 'OPEN',
+      selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
+    });
+    eventFilter = visibleEventFilter({ _id: { $in: marketEventIds } });
+  }
+
+  const event = await SportsAutoEvent.findOne(eventFilter).sort({ status: 1, commenceTime: 1 }).lean();
   if (event) {
     const match = await formatAutoEvent(event);
     const payload = { success: true, data: match, match, matchOfTheDay: match, event: match, cached: false };
@@ -513,11 +558,16 @@ export const settleNow = asyncHandler(async (_req, res) => {
 
 export const syncStatus = asyncHandler(async (_req, res) => {
   const provider = sportsProviderName();
-  const [lastOdds, lastScores, lastSettlement, events, openBets] = await Promise.all([
+  const [lastOdds, lastScores, lastSettlement, events, openMarkets, openBets] = await Promise.all([
     SportsSyncLog.findOne({ type: 'odds', provider }).sort({ createdAt: -1 }).lean(),
     SportsSyncLog.findOne({ type: 'scores', provider }).sort({ createdAt: -1 }).lean(),
     SportsSyncLog.findOne({ type: 'settlement' }).sort({ createdAt: -1 }).lean(),
     SportsAutoEvent.countDocuments(visibleEventFilter()),
+    SportsAutoMarket.countDocuments({
+      ...(shouldShowAllSportsProviders() ? {} : { provider }),
+      status: 'OPEN',
+      selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
+    }),
     SportsAutoBet.countDocuments({ status: 'OPEN' }),
   ]);
 
@@ -531,6 +581,8 @@ export const syncStatus = asyncHandler(async (_req, res) => {
       multiDetailsProvider: process.env.SPORTS_MULTI_DETAILS_ENABLED || '',
       autoSettlement: Boolean(process.env.SPORTS_AUTO_SETTLEMENT_ENABLED === 'true'),
       events,
+      openMarkets,
+      realOddsOnly: requireRealOddsForList(),
       openBets,
       lastOdds,
       lastScores,
