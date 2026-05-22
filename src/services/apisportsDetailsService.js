@@ -172,7 +172,7 @@ function nameScore(left = '', right = '') {
 
 function detectSport(event = {}) {
   const clean = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.sport || ''} ${event.league || ''}`.toLowerCase();
-  if (clean.includes('soccer') || clean.includes('football_epl') || clean.includes('epl') || clean.includes('uefa') || clean.includes('fifa') || clean.includes('la_liga') || clean.includes('bundesliga') || clean.includes('serie_a')) return 'football';
+  if (clean.includes('soccer') || clean.includes('football') || clean.includes('football_epl') || clean.includes('epl') || clean.includes('uefa') || clean.includes('fifa') || clean.includes('la_liga') || clean.includes('bundesliga') || clean.includes('serie_a')) return 'football';
   if (clean.includes('basketball') || clean.includes('basket') || clean.includes('nba') || clean.includes('ncaab')) return 'basketball';
   if (clean.includes('baseball') || clean.includes('mlb')) return 'baseball';
   if (clean.includes('icehockey') || clean.includes('hockey') || clean.includes('nhl')) return 'hockey';
@@ -476,11 +476,26 @@ export async function getApiSportsMatchDetails(event = {}) {
     };
   }
 
-  const cacheKey = `api-sports:${sport}:${event._id || event.id || event.providerEventId || ''}:${event.updatedAt || ''}`;
+  const cacheKey = `api-sports:${sport}:${event._id || event.id || event.providerEventId || ''}:${event.updatedAt || event.lastProviderUpdate || ''}`;
   const cached = detailsCache.get(cacheKey);
   if (cached && Date.now() - cached.createdAt < ttlMs()) return cached.data;
 
-  const game = await findGameByDate(config, event);
+  let game = null;
+
+  if (String(event.provider || '').toLowerCase() === 'apisports' && event.raw && typeof event.raw === 'object') {
+    game = event.raw;
+  }
+
+  if (!game && event.providerEventId) {
+    try {
+      const payload = await fetchApiSports(config, config.detailPath || config.listPath, { [config.idParam || 'id']: event.providerEventId });
+      game = responseArray(payload)[0] || null;
+    } catch (error) {
+      // Fall back to date/name matching below.
+    }
+  }
+
+  if (!game) game = await findGameByDate(config, event);
   if (!game) {
     const result = {
       enabled: true,

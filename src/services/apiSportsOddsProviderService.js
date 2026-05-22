@@ -10,104 +10,125 @@ const PROVIDER = 'apisports';
 const API_SPORTS_CONFIGS = {
   football: {
     key: 'football',
+    aliases: ['football', 'soccer', 'epl', 'uefa', 'fifa'],
     sportKey: 'football',
     label: 'Football',
     baseUrlEnv: 'APISPORTS_FOOTBALL_BASE_URL',
     baseUrl: 'https://v3.football.api-sports.io',
     listPath: '/fixtures',
+    liveListPath: '/fixtures',
     oddsPath: '/odds',
+    liveOddsPath: '/odds/live',
     oddsIdParam: 'fixture',
     matchWinnerBetId: 1,
   },
   basketball: {
     key: 'basketball',
+    aliases: ['basketball', 'basket', 'nba'],
     sportKey: 'basketball',
     label: 'Basketball',
     baseUrlEnv: 'APISPORTS_BASKETBALL_BASE_URL',
     baseUrl: 'https://v1.basketball.api-sports.io',
     listPath: '/games',
+    liveListPath: '/games',
     oddsPath: '/odds',
     oddsIdParam: 'game',
     matchWinnerBetId: 1,
   },
   baseball: {
     key: 'baseball',
+    aliases: ['baseball', 'mlb'],
     sportKey: 'baseball',
     label: 'Baseball',
     baseUrlEnv: 'APISPORTS_BASEBALL_BASE_URL',
     baseUrl: 'https://v1.baseball.api-sports.io',
     listPath: '/games',
+    liveListPath: '/games',
     oddsPath: '/odds',
     oddsIdParam: 'game',
     matchWinnerBetId: 1,
   },
   hockey: {
     key: 'hockey',
+    aliases: ['hockey', 'icehockey', 'nhl'],
     sportKey: 'hockey',
     label: 'Hockey',
     baseUrlEnv: 'APISPORTS_HOCKEY_BASE_URL',
     baseUrl: 'https://v1.hockey.api-sports.io',
     listPath: '/games',
+    liveListPath: '/games',
     oddsPath: '/odds',
     oddsIdParam: 'game',
     matchWinnerBetId: 1,
   },
   americanfootball: {
     key: 'americanfootball',
+    aliases: ['americanfootball', 'american-football', 'nfl', 'ncaaf', 'cfl'],
     sportKey: 'americanfootball',
     label: 'American Football',
     baseUrlEnv: 'APISPORTS_AMERICAN_FOOTBALL_BASE_URL',
     baseUrl: 'https://v1.american-football.api-sports.io',
     listPath: '/games',
+    liveListPath: '/games',
     oddsPath: '/odds',
     oddsIdParam: 'game',
     matchWinnerBetId: 1,
   },
   rugby: {
     key: 'rugby',
+    aliases: ['rugby'],
     sportKey: 'rugby',
     label: 'Rugby',
     baseUrlEnv: 'APISPORTS_RUGBY_BASE_URL',
     baseUrl: 'https://v1.rugby.api-sports.io',
     listPath: '/games',
+    liveListPath: '/games',
     oddsPath: '/odds',
     oddsIdParam: 'game',
     matchWinnerBetId: 1,
   },
   volleyball: {
     key: 'volleyball',
+    aliases: ['volleyball'],
     sportKey: 'volleyball',
     label: 'Volleyball',
     baseUrlEnv: 'APISPORTS_VOLLEYBALL_BASE_URL',
     baseUrl: 'https://v1.volleyball.api-sports.io',
     listPath: '/games',
+    liveListPath: '/games',
     oddsPath: '/odds',
     oddsIdParam: 'game',
     matchWinnerBetId: 1,
   },
   handball: {
     key: 'handball',
+    aliases: ['handball'],
     sportKey: 'handball',
     label: 'Handball',
     baseUrlEnv: 'APISPORTS_HANDBALL_BASE_URL',
     baseUrl: 'https://v1.handball.api-sports.io',
     listPath: '/games',
+    liveListPath: '/games',
     oddsPath: '/odds',
     oddsIdParam: 'game',
     matchWinnerBetId: 1,
   },
   afl: {
     key: 'afl',
+    aliases: ['afl', 'aussierules', 'aussie-rules'],
     sportKey: 'afl',
     label: 'AFL',
     baseUrlEnv: 'APISPORTS_AFL_BASE_URL',
     baseUrl: 'https://v1.afl.api-sports.io',
     listPath: '/games',
+    liveListPath: '/games',
     oddsPath: '/odds',
     oddsIdParam: 'game',
     matchWinnerBetId: 1,
   },
 };
+
+const DEFAULT_APISPORTS_ORDER = ['football', 'basketball', 'baseball', 'hockey', 'rugby', 'volleyball', 'americanfootball', 'handball', 'afl'];
 
 function apiSportsKey() {
   return process.env.APISPORTS_API_KEY || process.env.API_SPORTS_KEY || process.env.API_SPORTS_API_KEY || '';
@@ -193,6 +214,12 @@ function responseArray(payload) {
 function dateString(offset = 0) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
+
+function dateStringFromDate(dateValue) {
+  const date = dateValue ? new Date(dateValue) : new Date();
+  if (Number.isNaN(date.getTime())) return dateString(0);
   return date.toISOString().slice(0, 10);
 }
 
@@ -299,7 +326,6 @@ function normalizeStatus(item = {}) {
 }
 
 function scoreSide(item = {}, side = 'home') {
-  const opponent = side === 'home' ? 'away' : 'home';
   return getNumber(
     item?.goals?.[side]
     ?? item?.score?.fulltime?.[side]
@@ -310,8 +336,7 @@ function scoreSide(item = {}, side = 'home') {
     ?? item?.scores?.[side]
     ?? item?.teams?.[side]?.score
     ?? item?.[side]?.score
-    ?? item?.result?.[side]
-    ?? item?.score?.[opponent === 'home' ? 'away' : 'home'],
+    ?? item?.result?.[side],
     0
   );
 }
@@ -368,80 +393,184 @@ function normalizeSelectionId(providerEventId, marketKey, name, point) {
 function isMatchWinnerBet(bet = {}) {
   const name = String(bet.name || bet.label || bet.title || '').toLowerCase();
   const id = String(bet.id || bet.key || '');
-  return id === '1' || name.includes('match winner') || name.includes('winner') || name.includes('1x2') || name.includes('home/away');
+  return id === '1' || name.includes('match winner') || name.includes('winner') || name.includes('1x2') || name.includes('home/away') || name.includes('home away');
 }
 
 function mapOutcomeName(value = '', event = {}) {
   const clean = String(value || '').trim();
   const lower = clean.toLowerCase();
-  if (['home', '1', 'team 1', 'localteam'].includes(lower)) return event.homeTeam;
-  if (['away', '2', 'team 2', 'visitorteam'].includes(lower)) return event.awayTeam;
+  if (['home', '1', 'team 1', 'localteam', 'local team'].includes(lower)) return event.homeTeam;
+  if (['away', '2', 'team 2', 'visitorteam', 'visitor team'].includes(lower)) return event.awayTeam;
   if (['draw', 'x', 'tie'].includes(lower)) return 'Draw';
   return clean || 'Selection';
 }
 
-function oddsValuesFromPayload(payload = {}, event = {}) {
-  const rows = responseArray(payload);
-  for (const row of rows) {
-    const bookmakers = row?.bookmakers || row?.bookmaker || row?.odds?.bookmakers || [];
-    const list = Array.isArray(bookmakers) ? bookmakers : [bookmakers].filter(Boolean);
-    const bookmaker = pickBookmaker(list);
-    if (!bookmaker) continue;
+function normalizeBookmakerList(row = {}) {
+  const source = row?.bookmakers || row?.bookmaker || row?.odds?.bookmakers || row?.providers || [];
+  if (Array.isArray(source)) return source;
+  return source ? [source] : [];
+}
 
-    const bets = Array.isArray(bookmaker.bets) ? bookmaker.bets : [];
-    const bet = bets.find(isMatchWinnerBet) || bets[0];
-    const values = Array.isArray(bet?.values) ? bet.values : [];
-    const selections = values
-      .map((outcome) => {
-        const name = mapOutcomeName(outcome.value || outcome.name || outcome.label, event);
-        const price = getNumber(outcome.odd ?? outcome.odds ?? outcome.price ?? outcome.value_odd, 0);
-        return {
-          selectionId: normalizeSelectionId(event.providerEventId, 'h2h', name, null),
-          name,
-          price,
-          lastPrice: price,
-          point: null,
-          status: price > 1 ? 'OPEN' : 'SUSPENDED',
-        };
-      })
-      .filter((selection) => selection.name && selection.price > 1);
+function normalizeBetList(bookmaker = {}, row = {}) {
+  const source = bookmaker?.bets || bookmaker?.markets || bookmaker?.odds || row?.bets || row?.markets || row?.odds || [];
+  if (Array.isArray(source)) return source;
+  return source ? [source] : [];
+}
 
-    if (selections.length >= 2) {
+function normalizeValueList(bet = {}, row = {}) {
+  const source = bet?.values || bet?.outcomes || bet?.selections || row?.values || row?.outcomes || [];
+  if (Array.isArray(source)) return source;
+  return source ? [source] : [];
+}
+
+function rowEventId(row = {}) {
+  return firstString(
+    row?.fixture?.id,
+    row?.game?.id,
+    row?.event?.id,
+    row?.match?.id,
+    row?.id
+  );
+}
+
+function prioritizeRowsForEvent(rows = [], event = {}) {
+  const providerEventId = String(event?.providerEventId || '');
+  if (!providerEventId) return rows;
+  const exact = rows.filter((row) => String(rowEventId(row) || '') === providerEventId);
+  return exact.length ? exact : rows;
+}
+
+function selectionsFromBet(bet = {}, row = {}, event = {}) {
+  const values = normalizeValueList(bet, row);
+  return values
+    .map((outcome) => {
+      const name = mapOutcomeName(outcome.value || outcome.name || outcome.label || outcome.selection, event);
+      const price = getNumber(outcome.odd ?? outcome.odds ?? outcome.price ?? outcome.value_odd ?? outcome.coefficient ?? outcome.coef, 0);
       return {
-        selections,
-        bookmaker: bookmaker.name || bookmaker.title || bookmaker.key || '',
-        raw: { bookmaker, bet, row },
+        selectionId: normalizeSelectionId(event.providerEventId, 'h2h', name, null),
+        name,
+        price,
+        lastPrice: price,
+        point: null,
+        status: price > 1 ? 'OPEN' : 'SUSPENDED',
       };
+    })
+    .filter((selection) => selection.name && selection.price > 1);
+}
+
+function oddsValuesFromPayload(payload = {}, event = {}) {
+  const rows = prioritizeRowsForEvent(responseArray(payload), event);
+  for (const row of rows) {
+    const bookmakers = normalizeBookmakerList(row);
+
+    if (bookmakers.length) {
+      const bookmaker = pickBookmaker(bookmakers);
+      const bets = normalizeBetList(bookmaker, row);
+      const bet = bets.find(isMatchWinnerBet) || bets[0];
+      const selections = selectionsFromBet(bet, row, event);
+      if (selections.length >= 2) {
+        return {
+          selections,
+          bookmaker: bookmaker.name || bookmaker.title || bookmaker.key || '',
+          raw: { bookmaker, bet, row },
+        };
+      }
+    }
+
+    const bets = normalizeBetList({}, row);
+    for (const bet of bets) {
+      if (!isMatchWinnerBet(bet) && bets.length > 1) continue;
+      const selections = selectionsFromBet(bet, row, event);
+      if (selections.length >= 2) {
+        return {
+          selections,
+          bookmaker: row?.bookmaker?.name || row?.bookmaker || row?.provider || '',
+          raw: { bet, row },
+        };
+      }
     }
   }
 
   return { selections: [], bookmaker: '', raw: payload };
 }
 
+function dedupeFixtures(fixtures = []) {
+  const map = new Map();
+  fixtures.forEach((fixture) => {
+    const id = getEventId(fixture) || stableId(JSON.stringify(fixture).slice(0, 200));
+    if (!map.has(String(id))) map.set(String(id), fixture);
+  });
+  return Array.from(map.values());
+}
+
 async function fetchFixturesForSport(config) {
   const daysBack = Math.max(0, Number(process.env.APISPORTS_SYNC_DAYS_BACK || 0));
-  const daysAhead = Math.max(0, Number(process.env.APISPORTS_SYNC_DAYS_AHEAD || 2));
-  const eventsPerSport = Math.max(1, Number(process.env.APISPORTS_EVENTS_PER_SPORT || 12));
+  const daysAhead = Math.max(0, Number(process.env.APISPORTS_SYNC_DAYS_AHEAD || 7));
+  const eventsPerSport = Math.max(1, Number(process.env.APISPORTS_EVENTS_PER_SPORT || 40));
+  const syncLive = bool(process.env.APISPORTS_SYNC_LIVE, true);
   const fixtures = [];
+
+  if (syncLive && config.liveListPath) {
+    try {
+      const payload = await fetchApiSports(config, config.liveListPath, { live: 'all' });
+      fixtures.push(...responseArray(payload));
+    } catch (error) {
+      // Some API-SPORTS products may not support live=all on every sport. Date sync below still runs.
+    }
+  }
 
   for (let offset = -daysBack; offset <= daysAhead && fixtures.length < eventsPerSport; offset += 1) {
     const payload = await fetchApiSports(config, config.listPath, { date: dateString(offset) });
     fixtures.push(...responseArray(payload));
   }
 
-  return fixtures.slice(0, eventsPerSport);
+  return dedupeFixtures(fixtures).slice(0, eventsPerSport);
 }
 
-async function fetchOddsForFixture(config, providerEventId) {
-  const params = { [config.oddsIdParam]: providerEventId };
-  if (config.matchWinnerBetId) params.bet = config.matchWinnerBetId;
+function hasUsableMarket(marketData) {
+  return Array.isArray(marketData?.selections) && marketData.selections.filter((selection) => selection.price > 1).length >= 2;
+}
 
+async function fetchOddsAttempt(config, path, params) {
   try {
-    return await fetchApiSports(config, config.oddsPath, params);
+    return await fetchApiSports(config, path, params);
   } catch (error) {
-    if (!config.matchWinnerBetId) throw error;
-    return fetchApiSports(config, config.oddsPath, { [config.oddsIdParam]: providerEventId });
+    return { __error: error };
   }
+}
+
+async function fetchOddsForFixture(config, eventData) {
+  const providerEventId = eventData.providerEventId;
+  const fixtureDate = dateStringFromDate(eventData.commenceTime);
+  const attempts = [];
+
+  if (config.liveOddsPath && eventData.status === 'LIVE') {
+    attempts.push([config.liveOddsPath, { [config.oddsIdParam]: providerEventId, bet: config.matchWinnerBetId }]);
+    attempts.push([config.liveOddsPath, { [config.oddsIdParam]: providerEventId }]);
+  }
+
+  attempts.push([config.oddsPath, { [config.oddsIdParam]: providerEventId, bet: config.matchWinnerBetId }]);
+  attempts.push([config.oddsPath, { [config.oddsIdParam]: providerEventId }]);
+  attempts.push([config.oddsPath, { date: fixtureDate, bet: config.matchWinnerBetId }]);
+  attempts.push([config.oddsPath, { date: fixtureDate }]);
+
+  const errors = [];
+  for (const [path, params] of attempts) {
+    const payload = await fetchOddsAttempt(config, path, params);
+    if (payload?.__error) {
+      errors.push(payload.__error.message);
+      continue;
+    }
+
+    const marketData = oddsValuesFromPayload(payload, eventData);
+    if (hasUsableMarket(marketData)) return marketData;
+  }
+
+  return {
+    selections: [],
+    bookmaker: '',
+    raw: { message: 'No real provider odds returned for this fixture/game.', errors },
+  };
 }
 
 async function upsertApiSportsEvent(eventData, marketData = null) {
@@ -469,7 +598,13 @@ async function upsertApiSportsEvent(eventData, marketData = null) {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  if (!marketData?.selections?.length) return { event, marketCount: 0 };
+  if (!hasUsableMarket(marketData)) {
+    await SportsAutoMarket.updateMany(
+      { provider: PROVIDER, providerEventId: eventData.providerEventId },
+      { $set: { status: 'CLOSED', lastProviderUpdate: new Date() } }
+    );
+    return { event, marketCount: 0, oddsAvailable: false };
+  }
 
   await SportsAutoMarket.findOneAndUpdate(
     { provider: PROVIDER, providerEventId: eventData.providerEventId, marketKey: 'h2h' },
@@ -490,27 +625,22 @@ async function upsertApiSportsEvent(eventData, marketData = null) {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  return { event, marketCount: 1 };
+  return { event, marketCount: 1, oddsAvailable: true };
+}
+
+function configForRequestedSport(item = '') {
+  const clean = String(item || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return Object.values(API_SPORTS_CONFIGS).find((config) => config.aliases.some((alias) => clean.includes(alias.replace(/[^a-z0-9]/g, '')))) || null;
 }
 
 function configuredSports() {
-  const requested = csv(process.env.SPORTS_APISPORTS_SPORTS || env.SPORTS_AUTO_SPORT_KEYS || 'all');
-  const allMode = requested.some((item) => ['all', 'active'].includes(String(item).toLowerCase())) || bool(env.SPORTS_AUTO_SYNC_ACTIVE_SPORTS, false);
+  const explicitApiSportsList = String(process.env.SPORTS_APISPORTS_SPORTS || '').trim();
+  const requested = csv(explicitApiSportsList || env.SPORTS_AUTO_SPORT_KEYS || 'football,basketball,hockey,rugby,volleyball');
+  const allMode = requested.some((item) => ['all', 'active'].includes(String(item).toLowerCase()))
+    || (!explicitApiSportsList && bool(env.SPORTS_AUTO_SYNC_ACTIVE_SPORTS, false));
   const configs = allMode
-    ? Object.values(API_SPORTS_CONFIGS)
-    : requested.map((item) => {
-      const clean = String(item || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (clean.includes('soccer') || clean.includes('football') || clean.includes('epl') || clean.includes('uefa')) return API_SPORTS_CONFIGS.football;
-      if (clean.includes('basket')) return API_SPORTS_CONFIGS.basketball;
-      if (clean.includes('baseball') || clean.includes('mlb')) return API_SPORTS_CONFIGS.baseball;
-      if (clean.includes('hockey')) return API_SPORTS_CONFIGS.hockey;
-      if (clean.includes('americanfootball') || clean.includes('nfl') || clean.includes('ncaaf')) return API_SPORTS_CONFIGS.americanfootball;
-      if (clean.includes('rugby')) return API_SPORTS_CONFIGS.rugby;
-      if (clean.includes('volleyball')) return API_SPORTS_CONFIGS.volleyball;
-      if (clean.includes('handball')) return API_SPORTS_CONFIGS.handball;
-      if (clean.includes('afl') || clean.includes('aussie')) return API_SPORTS_CONFIGS.afl;
-      return null;
-    }).filter(Boolean);
+    ? DEFAULT_APISPORTS_ORDER.map((key) => API_SPORTS_CONFIGS[key]).filter(Boolean)
+    : requested.map(configForRequestedSport).filter(Boolean);
 
   const unique = configs.filter((config, index, list) => list.findIndex((item) => item.key === config.key) === index);
   const maxSports = Math.max(1, Number(env.SPORTS_AUTO_MAX_SPORTS_PER_SYNC || 12));
@@ -555,10 +685,12 @@ export async function syncApiSportsOdds() {
   const startedAt = new Date();
   const sports = configuredSports();
   const stats = {
-    mode: 'apisports',
+    mode: 'apisports-real-provider-odds',
     sports: sports.length,
     events: 0,
     markets: 0,
+    oddsAvailableEvents: 0,
+    noOddsEvents: 0,
     skippedSports: [],
     skippedEvents: [],
   };
@@ -572,8 +704,7 @@ export async function syncApiSportsOdds() {
 
         let marketData = null;
         try {
-          const oddsPayload = await fetchOddsForFixture(config, eventData.providerEventId);
-          marketData = oddsValuesFromPayload(oddsPayload, eventData);
+          marketData = await fetchOddsForFixture(config, eventData);
         } catch (error) {
           stats.skippedEvents.push({ sport: config.key, eventId: eventData.providerEventId, message: error.message, status: error.status || null });
         }
@@ -581,6 +712,8 @@ export async function syncApiSportsOdds() {
         const result = await upsertApiSportsEvent(eventData, marketData);
         stats.events += 1;
         stats.markets += result.marketCount;
+        if (result.oddsAvailable) stats.oddsAvailableEvents += 1;
+        else stats.noOddsEvents += 1;
       }
     } catch (error) {
       stats.skippedSports.push({ sportKey: config.key, message: error.message, status: error.status || null });
@@ -592,8 +725,8 @@ export async function syncApiSportsOdds() {
   await SportsSyncLog.create({
     type: 'odds',
     provider: PROVIDER,
-    status: stats.events ? (stats.skippedSports.length || stats.skippedEvents.length ? 'partial' : 'success') : 'failed',
-    message: stats.events ? 'API-SPORTS odds sync completed' : 'No API-SPORTS events synced',
+    status: stats.events ? (stats.skippedSports.length || stats.skippedEvents.length || stats.noOddsEvents ? 'partial' : 'success') : 'failed',
+    message: stats.events ? 'API-SPORTS real odds sync completed' : 'No API-SPORTS events synced',
     stats,
     startedAt,
     finishedAt: new Date(),
