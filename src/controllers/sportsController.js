@@ -11,6 +11,7 @@ import { AppError } from '../utils/appError.js';
 import { syncSportsAll, syncSportsOdds, syncSportsScores } from '../services/freeSportsProviderService.js';
 import { placeSportsBet, settleOpenSportsBets } from '../services/sportsBettingService.js';
 import { getSportsMatchDetails, sportsDetailsConfigured } from '../services/sportsDetailsService.js';
+import { apiSportsOddsProviderConfigured } from '../services/apiSportsOddsProviderService.js';
 
 let backgroundSportsSyncPromise = null;
 let liveMatchesCache = { createdAt: 0, payload: null };
@@ -28,12 +29,21 @@ function sportsProviderName() {
 }
 
 function sportsApiKeyConfigured() {
+  const provider = sportsProviderName();
+  if (provider === 'apisports' || provider === 'api-sports' || provider === 'api_sports') {
+    return apiSportsOddsProviderConfigured();
+  }
+
   return Boolean(
     process.env.SPORTS_ODDS_API_KEY
     || process.env.THE_ODDS_API_KEY
     || process.env.SPORTSGAMEODDS_API_KEY
     || process.env.SPORTS_GAME_ODDS_API_KEY
   );
+}
+
+function shouldShowAllSportsProviders() {
+  return String(process.env.SPORTS_SHOW_ALL_PROVIDERS || '').toLowerCase() === 'true';
 }
 
 function shouldSyncOnRequest() {
@@ -103,7 +113,9 @@ function visibleEventCutoff() {
 }
 
 function visibleEventFilter(extra = {}) {
+  const providerFilter = shouldShowAllSportsProviders() ? {} : { provider: sportsProviderName() };
   return {
+    ...providerFilter,
     isActive: true,
     completed: { $ne: true },
     status: { $in: ['LIVE', 'UPCOMING'] },
@@ -500,9 +512,10 @@ export const settleNow = asyncHandler(async (_req, res) => {
 });
 
 export const syncStatus = asyncHandler(async (_req, res) => {
+  const provider = sportsProviderName();
   const [lastOdds, lastScores, lastSettlement, events, openBets] = await Promise.all([
-    SportsSyncLog.findOne({ type: 'odds' }).sort({ createdAt: -1 }).lean(),
-    SportsSyncLog.findOne({ type: 'scores' }).sort({ createdAt: -1 }).lean(),
+    SportsSyncLog.findOne({ type: 'odds', provider }).sort({ createdAt: -1 }).lean(),
+    SportsSyncLog.findOne({ type: 'scores', provider }).sort({ createdAt: -1 }).lean(),
     SportsSyncLog.findOne({ type: 'settlement' }).sort({ createdAt: -1 }).lean(),
     SportsAutoEvent.countDocuments(visibleEventFilter()),
     SportsAutoBet.countDocuments({ status: 'OPEN' }),
@@ -511,7 +524,7 @@ export const syncStatus = asyncHandler(async (_req, res) => {
   res.json({
     success: true,
     data: {
-      provider: sportsProviderName(),
+      provider,
       enabled: sportsApiKeyConfigured(),
       detailsProvider: process.env.SPORTS_DETAILS_PROVIDER || 'hybrid',
       detailsEnabled: sportsDetailsConfigured(),
