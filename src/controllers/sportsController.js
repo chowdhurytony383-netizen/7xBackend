@@ -12,6 +12,7 @@ import { syncSportsAll, syncSportsOdds, syncSportsScores } from '../services/fre
 import { placeSportsBet, settleOpenSportsBets } from '../services/sportsBettingService.js';
 import { getSportsMatchDetails, sportsDetailsConfigured } from '../services/sportsDetailsService.js';
 import { apiSportsOddsProviderConfigured } from '../services/apiSportsOddsProviderService.js';
+import { sportmonksCricketConfigured } from '../services/sportmonksCricketService.js';
 
 let backgroundSportsSyncPromise = null;
 let liveMatchesCache = { createdAt: 0, payload: null };
@@ -25,13 +26,21 @@ function cacheTtlMs(name, fallbackSeconds) {
 }
 
 function sportsProviderName() {
-  return String(process.env.SPORTS_ODDS_PROVIDER || 'theoddsapi').toLowerCase();
+  return String(
+    process.env.SPORTS_PROVIDER
+    || process.env.SPORTS_ODDS_PROVIDER
+    || 'theoddsapi'
+  ).toLowerCase();
 }
 
 function sportsApiKeyConfigured() {
   const provider = sportsProviderName();
   if (provider === 'apisports' || provider === 'api-sports' || provider === 'api_sports') {
     return apiSportsOddsProviderConfigured();
+  }
+
+  if (provider === 'sportmonks' || provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket') {
+    return sportmonksCricketConfigured();
   }
 
   return Boolean(
@@ -53,9 +62,12 @@ function boolEnv(name, fallback = false) {
 }
 
 function requireRealOddsForList() {
+  // Visibility and betting safety are separate.
+  // SPORTS_REQUIRE_REAL_ODDS keeps fake odds off for betting;
+  // SPORTS_HIDE_EVENTS_WITHOUT_ODDS controls whether matches without odds are hidden from the list.
+  if (process.env.SPORTS_HIDE_EVENTS_WITHOUT_ODDS !== undefined) return boolEnv('SPORTS_HIDE_EVENTS_WITHOUT_ODDS', false);
   if (process.env.SPORTS_REQUIRE_REAL_ODDS !== undefined) return boolEnv('SPORTS_REQUIRE_REAL_ODDS', true);
-  if (process.env.SPORTS_HIDE_EVENTS_WITHOUT_ODDS !== undefined) return boolEnv('SPORTS_HIDE_EVENTS_WITHOUT_ODDS', true);
-  return boolEnv('SPORTS_USE_PROVIDER_ODDS_ONLY', false) || boolEnv('SPORTS_USE_BOOK_ODDS_ONLY', false);
+  return false;
 }
 
 function hasRealOdds(match = {}) {
