@@ -212,8 +212,8 @@ function syntheticDrawOdds() {
 }
 
 function sportAllowsDraw(event = {}) {
-  if (boolEnv('SPORTS_DRAW_FOR_ALL', true)) return true;
-  if (boolEnv('SPORTS_SYNTHETIC_DRAW_ENABLED', true) === false) return false;
+  if (boolEnv('SPORTS_DRAW_FOR_ALL', false)) return true;
+  if (boolEnv('SPORTS_SYNTHETIC_DRAW_ENABLED', false) === false) return false;
 
   const clean = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.sport || ''} ${event.league || ''}`.toLowerCase();
   return (
