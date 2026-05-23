@@ -26,8 +26,68 @@ function providerList() {
   return raw.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+function oddsProviderConfigured() {
+  return Boolean(
+    process.env.SPORTS_ODDS_API_KEY
+    || process.env.THE_ODDS_API_KEY
+    || process.env.SPORTSGAMEODDS_API_KEY
+    || process.env.SPORTS_GAME_ODDS_API_KEY
+  );
+}
+
+function canUseTheOddsApiBasicDetails(event = {}) {
+  const provider = String(event.provider || process.env.SPORTS_ODDS_PROVIDER || '').toLowerCase();
+  const detailsProviders = providerList();
+  return (provider === 'theoddsapi' || detailsProviders.includes('theoddsapi')) && oddsProviderConfigured();
+}
+
+function getTheOddsApiBasicDetails(event = {}) {
+  const raw = event.raw && typeof event.raw === 'object' ? event.raw : {};
+  const bookmakers = Array.isArray(raw.bookmakers) ? raw.bookmakers : [];
+  const markets = bookmakers.flatMap((bookmaker) => (Array.isArray(bookmaker.markets) ? bookmaker.markets : []));
+
+  return {
+    enabled: true,
+    provider: 'theoddsapi',
+    available: true,
+    message: 'Basic match details from The Odds API. Detailed stats/lineups need Sportmonks or API-SPORTS details access.',
+    fixtureId: event.providerEventId || raw.id || '',
+    sport: event.sportTitle || raw.sport_title || event.sportKey || '',
+    league: event.league || raw.sport_title || '',
+    startingAt: event.commenceTime || raw.commence_time || null,
+    state: {
+      name: event.status || '',
+      short: event.status || '',
+      timer: null,
+    },
+    homeTeam: {
+      id: null,
+      name: event.homeTeam || raw.home_team || '',
+      logo: '',
+      raw: null,
+    },
+    awayTeam: {
+      id: null,
+      name: event.awayTeam || raw.away_team || '',
+      logo: '',
+      raw: null,
+    },
+    scores: event.scores || raw.scores || null,
+    events: [],
+    statistics: [],
+    lineups: [],
+    players: [],
+    standings: [],
+    raw: {
+      providerEvent: raw,
+      bookmakers,
+      markets,
+    },
+  };
+}
+
 export function sportsDetailsConfigured() {
-  return detailsEnabled() && (sportmonksConfigured() || apiSportsProviderConfigured());
+  return detailsEnabled() && (sportmonksConfigured() || apiSportsProviderConfigured() || oddsProviderConfigured());
 }
 
 export async function getSportsMatchDetails(event = {}) {
@@ -44,6 +104,7 @@ export async function getSportsMatchDetails(event = {}) {
   const providers = providerList();
   const canUseSportmonks = providers.includes('sportmonks') && sportmonksConfigured() && footballLike(event);
   const canUseApiSports = (providers.includes('api-sports') || providers.includes('apisports')) && apiSportsProviderConfigured() && apiSportsSupportsEvent(event);
+  const canUseTheOddsApi = canUseTheOddsApiBasicDetails(event);
 
   if (canUseSportmonks) {
     const details = await getSportmonksMatchDetails(event);
@@ -54,14 +115,16 @@ export async function getSportsMatchDetails(event = {}) {
   if (canUseApiSports) {
     const details = await getApiSportsMatchDetails(event);
     if (details?.available) return details;
-    if (!canUseSportmonks) return details;
+    if (!canUseSportmonks && !canUseTheOddsApi) return details;
   }
+
+  if (canUseTheOddsApi) return getTheOddsApiBasicDetails(event);
 
   return {
     enabled: true,
     provider: providerList().join(',') || 'details',
     available: false,
-    message: 'No configured details provider supports this sport/match yet. Keep real odds from The Odds API; add a specific data provider for unsupported sports such as tennis or cricket if needed.',
+    message: 'No configured details provider supports this sport/match yet. Real odds can still come from The Odds API; full match stats/lineups need Sportmonks or API-SPORTS details coverage.',
     raw: {
       sportKey: event.sportKey,
       sportTitle: event.sportTitle,

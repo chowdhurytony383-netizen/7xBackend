@@ -10,12 +10,65 @@ const THE_ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const DEFAULT_SPORT_KEYS = [
   'soccer_epl',
   'soccer_uefa_champs_league',
+  'soccer_uefa_europa_league',
+  'soccer_spain_la_liga',
+  'soccer_italy_serie_a',
+  'soccer_germany_bundesliga',
+  'soccer_france_ligue_one',
   'cricket_test_match',
   'cricket_odi',
   'cricket_t20',
   'basketball_nba',
   'tennis_atp_singles',
   'tennis_wta_singles',
+];
+
+const THE_ODDS_SPORT_ALIASES = {
+  football: [
+    'soccer_epl',
+    'soccer_uefa_champs_league',
+    'soccer_uefa_europa_league',
+    'soccer_spain_la_liga',
+    'soccer_italy_serie_a',
+    'soccer_germany_bundesliga',
+    'soccer_france_ligue_one',
+    'soccer_conmebol_copa_libertadores',
+    'soccer_conmebol_copa_sudamericana',
+  ],
+  soccer: [
+    'soccer_epl',
+    'soccer_uefa_champs_league',
+    'soccer_uefa_europa_league',
+    'soccer_spain_la_liga',
+    'soccer_italy_serie_a',
+    'soccer_germany_bundesliga',
+    'soccer_france_ligue_one',
+    'soccer_conmebol_copa_libertadores',
+    'soccer_conmebol_copa_sudamericana',
+  ],
+  cricket: ['cricket_test_match', 'cricket_odi', 'cricket_t20'],
+  basketball: ['basketball_nba', 'basketball_ncaab', 'basketball_euroleague'],
+  tennis: ['tennis_atp_singles', 'tennis_wta_singles'],
+  hockey: ['icehockey_nhl', 'icehockey_sweden_hockey_league', 'icehockey_world_championship'],
+  rugby: ['rugbyleague_nrl', 'rugbyunion_super_rugby'],
+  volleyball: ['volleyball'],
+  baseball: ['baseball_mlb', 'baseball_npb', 'baseball_kbo'],
+  boxing: ['boxing_boxing'],
+  mma: ['mma_mixed_martial_arts'],
+};
+
+const DEFAULT_PRIORITY_SPORT_PREFIXES = [
+  'soccer_',
+  'cricket_',
+  'basketball_',
+  'tennis_',
+  'icehockey_',
+  'rugbyleague_',
+  'rugbyunion_',
+  'volleyball',
+  'baseball_',
+  'boxing_',
+  'mma_',
 ];
 
 let lastOddsSyncAt = 0;
@@ -30,6 +83,48 @@ function csv(value, fallback = []) {
   const source = String(value || '').trim();
   if (!source) return fallback;
   return source.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function theOddsApiKey() {
+  return process.env.SPORTS_ODDS_API_KEY
+    || process.env.THE_ODDS_API_KEY
+    || process.env.SPORTSGAMEODDS_API_KEY
+    || process.env.SPORTS_GAME_ODDS_API_KEY
+    || env.SPORTS_ODDS_API_KEY
+    || '';
+}
+
+function normalizeRequestedSportKey(value = '') {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+}
+
+function expandConfiguredSportKeys(items = []) {
+  const expanded = [];
+  items.forEach((item) => {
+    const clean = normalizeRequestedSportKey(item);
+    if (!clean || clean === 'all' || clean === 'active') return;
+
+    const aliases = THE_ODDS_SPORT_ALIASES[clean];
+    if (aliases?.length) expanded.push(...aliases);
+    else expanded.push(clean);
+  });
+
+  return expanded.filter((key, index, list) => key && list.indexOf(key) === index);
+}
+
+function sportPriorityIndex(sportKey = '') {
+  const prefixes = csv(process.env.SPORTS_PRIORITY_SPORT_PREFIXES || '', DEFAULT_PRIORITY_SPORT_PREFIXES);
+  const key = String(sportKey || '').toLowerCase();
+  const found = prefixes.findIndex((prefix) => key.startsWith(String(prefix).toLowerCase()));
+  return found === -1 ? prefixes.length : found;
+}
+
+function sortSportKeysByPriority(keys = []) {
+  return [...keys].sort((a, b) => {
+    const rank = sportPriorityIndex(a) - sportPriorityIndex(b);
+    if (rank !== 0) return rank;
+    return String(a).localeCompare(String(b));
+  });
 }
 
 function bool(value, fallback = false) {
@@ -140,8 +235,8 @@ function syntheticDrawOdds() {
 }
 
 function sportAllowsDraw(sportKey = '', sportTitle = '') {
-  if (bool(process.env.SPORTS_DRAW_FOR_ALL, true)) return true;
-  if (bool(process.env.SPORTS_SYNTHETIC_DRAW_ENABLED, true) === false) return false;
+  if (bool(process.env.SPORTS_DRAW_FOR_ALL, false)) return true;
+  if (bool(process.env.SPORTS_SYNTHETIC_DRAW_ENABLED, false) === false) return false;
 
   const clean = `${sportKey || ''} ${sportTitle || ''}`.toLowerCase();
   return (
@@ -195,19 +290,23 @@ function pickBookmaker(bookmakers = []) {
 }
 
 function isAllSportsMode() {
-  const value = String(env.SPORTS_AUTO_SPORT_KEYS || '').trim().toLowerCase();
-  return value === 'all' || value === 'active' || bool(env.SPORTS_AUTO_SYNC_ACTIVE_SPORTS, false);
+  const explicit = process.env.SPORTS_AUTO_SPORT_KEYS !== undefined && String(process.env.SPORTS_AUTO_SPORT_KEYS).trim() !== '';
+  const value = String(explicit ? process.env.SPORTS_AUTO_SPORT_KEYS : env.SPORTS_AUTO_SPORT_KEYS || '').trim().toLowerCase();
+  if (value === 'all' || value === 'active') return true;
+  if (explicit) return false;
+  return bool(env.SPORTS_AUTO_SYNC_ACTIVE_SPORTS, false);
 }
 
 async function fetchActiveSportKeys() {
-  if (!env.SPORTS_ODDS_API_KEY) return DEFAULT_SPORT_KEYS;
+  const apiKey = theOddsApiKey();
+  if (!apiKey) return DEFAULT_SPORT_KEYS;
 
   const ttl = Math.max(300, Number(env.SPORTS_ACTIVE_SPORTS_TTL_SECONDS || 1800)) * 1000;
   if (cachedActiveSportKeys.length && Date.now() - lastActiveSportsSyncAt < ttl) return cachedActiveSportKeys;
   if (activeSportsPromise) return activeSportsPromise;
 
   activeSportsPromise = (async () => {
-    const url = `${THE_ODDS_API_BASE}/sports?apiKey=${encodeURIComponent(env.SPORTS_ODDS_API_KEY)}`;
+    const url = `${THE_ODDS_API_BASE}/sports?apiKey=${encodeURIComponent(apiKey)}`;
     const data = await fetchJson(url);
     if (!Array.isArray(data)) return DEFAULT_SPORT_KEYS;
 
@@ -218,7 +317,7 @@ async function fetchActiveSportKeys() {
       .filter(Boolean);
 
     const maxSports = Math.max(1, Number(env.SPORTS_AUTO_MAX_SPORTS_PER_SYNC || 12));
-    cachedActiveSportKeys = sportKeys.slice(0, maxSports);
+    cachedActiveSportKeys = sortSportKeysByPriority(sportKeys).slice(0, maxSports);
     lastActiveSportsSyncAt = Date.now();
     return cachedActiveSportKeys.length ? cachedActiveSportKeys : DEFAULT_SPORT_KEYS;
   })().finally(() => {
@@ -230,7 +329,9 @@ async function fetchActiveSportKeys() {
 
 async function getConfiguredSportKeys() {
   if (isAllSportsMode()) return fetchActiveSportKeys();
-  return csv(env.SPORTS_AUTO_SPORT_KEYS || '', DEFAULT_SPORT_KEYS);
+  const requested = csv(process.env.SPORTS_AUTO_SPORT_KEYS || env.SPORTS_AUTO_SPORT_KEYS || '', DEFAULT_SPORT_KEYS);
+  const expanded = expandConfiguredSportKeys(requested);
+  return expanded.length ? expanded : DEFAULT_SPORT_KEYS;
 }
 
 async function upsertOddsEvent(providerEvent, sportKey) {
@@ -311,8 +412,9 @@ async function upsertOddsEvent(providerEvent, sportKey) {
 }
 
 async function syncTheOddsApiOdds() {
-  if (!env.SPORTS_ODDS_API_KEY) {
-    return { skipped: true, reason: 'SPORTS_ODDS_API_KEY missing' };
+  const apiKey = theOddsApiKey();
+  if (!apiKey) {
+    return { skipped: true, reason: 'SPORTS_ODDS_API_KEY or THE_ODDS_API_KEY missing' };
   }
 
   const startedAt = new Date();
@@ -330,7 +432,7 @@ async function syncTheOddsApiOdds() {
   };
 
   for (const sportKey of sportKeys) {
-    const url = `${THE_ODDS_API_BASE}/sports/${encodeURIComponent(sportKey)}/odds?apiKey=${encodeURIComponent(env.SPORTS_ODDS_API_KEY)}&regions=${regions}&markets=${markets}&oddsFormat=${oddsFormat}`;
+    const url = `${THE_ODDS_API_BASE}/sports/${encodeURIComponent(sportKey)}/odds?apiKey=${encodeURIComponent(apiKey)}&regions=${regions}&markets=${markets}&oddsFormat=${oddsFormat}`;
     try {
       const events = await fetchJson(url);
       if (!Array.isArray(events)) continue;
@@ -361,8 +463,9 @@ async function syncTheOddsApiOdds() {
 }
 
 async function syncTheOddsApiScores() {
-  if (!env.SPORTS_ODDS_API_KEY) {
-    return { skipped: true, reason: 'SPORTS_ODDS_API_KEY missing' };
+  const apiKey = theOddsApiKey();
+  if (!apiKey) {
+    return { skipped: true, reason: 'SPORTS_ODDS_API_KEY or THE_ODDS_API_KEY missing' };
   }
 
   const startedAt = new Date();
@@ -377,7 +480,7 @@ async function syncTheOddsApiScores() {
   };
 
   for (const sportKey of sportKeys) {
-    const url = `${THE_ODDS_API_BASE}/sports/${encodeURIComponent(sportKey)}/scores?apiKey=${encodeURIComponent(env.SPORTS_ODDS_API_KEY)}&daysFrom=3`;
+    const url = `${THE_ODDS_API_BASE}/sports/${encodeURIComponent(sportKey)}/scores?apiKey=${encodeURIComponent(apiKey)}&daysFrom=3`;
     try {
       const events = await fetchJson(url);
       if (!Array.isArray(events)) continue;
