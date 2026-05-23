@@ -1,4 +1,5 @@
 import { getSportmonksMatchDetails } from './sportmonksDetailsService.js';
+import { getSportmonksCricketMatchDetails, sportmonksCricketConfigured } from './sportmonksCricketService.js';
 import { apiSportsProviderConfigured, apiSportsSupportsEvent, getApiSportsMatchDetails } from './apisportsDetailsService.js';
 
 function boolEnv(name, fallback = false) {
@@ -8,12 +9,21 @@ function boolEnv(name, fallback = false) {
 }
 
 function sportmonksConfigured() {
+  return Boolean(process.env.SPORTMONKS_API_TOKEN) || sportmonksCricketConfigured();
+}
+
+function sportmonksFootballConfigured() {
   return Boolean(process.env.SPORTMONKS_API_TOKEN);
 }
 
 function footballLike(event = {}) {
   const clean = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.sport || ''} ${event.league || ''}`.toLowerCase();
   return clean.includes('soccer') || clean.includes('football') || clean.includes('uefa') || clean.includes('epl') || clean.includes('fifa');
+}
+
+function cricketLike(event = {}) {
+  const clean = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.sport || ''} ${event.league || ''} ${event.provider || ''}`.toLowerCase();
+  return clean.includes('cricket') || clean.includes('sportmonks');
 }
 
 function detailsEnabled() {
@@ -102,20 +112,27 @@ export async function getSportsMatchDetails(event = {}) {
   }
 
   const providers = providerList();
-  const canUseSportmonks = providers.includes('sportmonks') && sportmonksConfigured() && footballLike(event);
+  const canUseSportmonksCricket = providers.includes('sportmonks') && sportmonksCricketConfigured() && cricketLike(event);
+  const canUseSportmonksFootball = providers.includes('sportmonks') && sportmonksFootballConfigured() && footballLike(event);
   const canUseApiSports = (providers.includes('api-sports') || providers.includes('apisports')) && apiSportsProviderConfigured() && apiSportsSupportsEvent(event);
   const canUseTheOddsApi = canUseTheOddsApiBasicDetails(event);
 
-  if (canUseSportmonks) {
+  if (canUseSportmonksCricket) {
+    const details = await getSportmonksCricketMatchDetails(event);
+    if (details?.available) return details;
+    if (!canUseApiSports && !canUseSportmonksFootball && !canUseTheOddsApi) return details;
+  }
+
+  if (canUseSportmonksFootball) {
     const details = await getSportmonksMatchDetails(event);
     if (details?.available) return details;
-    if (!canUseApiSports) return details;
+    if (!canUseApiSports && !canUseTheOddsApi) return details;
   }
 
   if (canUseApiSports) {
     const details = await getApiSportsMatchDetails(event);
     if (details?.available) return details;
-    if (!canUseSportmonks && !canUseTheOddsApi) return details;
+    if (!canUseSportmonksCricket && !canUseSportmonksFootball && !canUseTheOddsApi) return details;
   }
 
   if (canUseTheOddsApi) return getTheOddsApiBasicDetails(event);
@@ -130,6 +147,7 @@ export async function getSportsMatchDetails(event = {}) {
       sportTitle: event.sportTitle,
       league: event.league,
       sportmonksConfigured: sportmonksConfigured(),
+      sportmonksCricketConfigured: sportmonksCricketConfigured(),
       apiSportsConfigured: apiSportsProviderConfigured(),
     },
   };

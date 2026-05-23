@@ -5,6 +5,7 @@ import SportsAutoEvent from '../models/SportsAutoEvent.js';
 import SportsAutoMarket from '../models/SportsAutoMarket.js';
 import SportsSyncLog from '../models/SportsSyncLog.js';
 import { clearApiSportsStaleEvents, syncApiSportsOdds, syncApiSportsScores } from './apiSportsOddsProviderService.js';
+import { clearSportmonksCricketStaleEvents, syncSportmonksCricketOdds, syncSportmonksCricketScores } from './sportmonksCricketService.js';
 
 const THE_ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const DEFAULT_SPORT_KEYS = [
@@ -531,7 +532,12 @@ async function syncTheOddsApiScores() {
 }
 
 function currentSportsProvider() {
-  return String(env.SPORTS_ODDS_PROVIDER || process.env.SPORTS_ODDS_PROVIDER || 'theoddsapi').toLowerCase();
+  return String(
+    process.env.SPORTS_PROVIDER
+    || process.env.SPORTS_ODDS_PROVIDER
+    || env.SPORTS_ODDS_PROVIDER
+    || 'theoddsapi'
+  ).toLowerCase();
 }
 
 function useApiSportsProvider() {
@@ -539,12 +545,17 @@ function useApiSportsProvider() {
   return provider === 'apisports' || provider === 'api-sports' || provider === 'api_sports';
 }
 
+function useSportmonksProvider() {
+  const provider = currentSportsProvider();
+  return provider === 'sportmonks' || provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket';
+}
+
 export async function syncSportsOdds({ force = false } = {}) {
   const ttl = Math.max(5, Number(env.SPORTS_ODDS_SYNC_TTL_SECONDS || 30)) * 1000;
   if (!force && Date.now() - lastOddsSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (oddsSyncPromise) return oddsSyncPromise;
 
-  oddsSyncPromise = (useApiSportsProvider() ? syncApiSportsOdds() : syncTheOddsApiOdds())
+  oddsSyncPromise = (useSportmonksProvider() ? syncSportmonksCricketOdds({ force }) : useApiSportsProvider() ? syncApiSportsOdds() : syncTheOddsApiOdds())
     .finally(() => {
       lastOddsSyncAt = Date.now();
       oddsSyncPromise = null;
@@ -558,7 +569,7 @@ export async function syncSportsScores({ force = false } = {}) {
   if (!force && Date.now() - lastScoreSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (scoreSyncPromise) return scoreSyncPromise;
 
-  scoreSyncPromise = (useApiSportsProvider() ? syncApiSportsScores() : syncTheOddsApiScores())
+  scoreSyncPromise = (useSportmonksProvider() ? syncSportmonksCricketScores({ force }) : useApiSportsProvider() ? syncApiSportsScores() : syncTheOddsApiScores())
     .finally(() => {
       lastScoreSyncAt = Date.now();
       scoreSyncPromise = null;
@@ -568,6 +579,7 @@ export async function syncSportsScores({ force = false } = {}) {
 }
 
 export async function clearStaleSportsEvents() {
+  if (useSportmonksProvider()) return clearSportmonksCricketStaleEvents();
   return useApiSportsProvider() ? clearApiSportsStaleEvents() : deactivateStaleSportsEvents('theoddsapi');
 }
 
