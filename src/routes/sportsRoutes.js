@@ -16,6 +16,8 @@ import { protect, requireAdmin } from '../middleware/auth.js';
 const router = express.Router();
 
 router.get('/categories', categories);
+router.get('/live', liveMatches);
+router.get('/matches', liveMatches);
 router.get('/live-matches', liveMatches);
 router.get('/match-of-the-day', matchOfTheDay);
 router.get('/events/:eventId', eventDetails);
