@@ -5,7 +5,8 @@ import SportsAutoEvent from '../models/SportsAutoEvent.js';
 import SportsAutoMarket from '../models/SportsAutoMarket.js';
 import SportsSyncLog from '../models/SportsSyncLog.js';
 import { clearApiSportsStaleEvents, syncApiSportsOdds, syncApiSportsScores } from './apiSportsOddsProviderService.js';
-import { clearSportmonksCricketStaleEvents, syncSportmonksCricketOdds, syncSportmonksCricketScores } from './sportmonksCricketService.js';
+import { clearSportmonksCricketStaleEvents, sportmonksCricketConfigured, syncSportmonksCricketOdds, syncSportmonksCricketScores } from './sportmonksCricketService.js';
+import { clearSportmonksFootballStaleEvents, sportmonksFootballConfigured, syncSportmonksFootballOdds, syncSportmonksFootballScores } from './sportmonksFootballService.js';
 
 const THE_ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const DEFAULT_SPORT_KEYS = [
@@ -547,7 +548,100 @@ function useApiSportsProvider() {
 
 function useSportmonksProvider() {
   const provider = currentSportsProvider();
-  return provider === 'sportmonks' || provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket';
+  return provider === 'sportmonks' || provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket' || provider === 'sportmonks-football' || provider === 'sportmonks_football';
+}
+
+function requestedSportmonksSports() {
+  const provider = currentSportsProvider();
+  if (provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket') return ['cricket'];
+  if (provider === 'sportmonks-football' || provider === 'sportmonks_football') return ['football'];
+
+  const configured = csv(process.env.SPORTS_AUTO_SPORT_KEYS || env.SPORTS_AUTO_SPORT_KEYS || '', ['cricket', 'football']);
+  const normalized = configured.map((item) => String(item || '').trim().toLowerCase());
+  const allMode = normalized.some((item) => item === 'all' || item === 'active' || item === '*');
+  if (allMode) return ['cricket', 'football'];
+
+  const result = [];
+  normalized.forEach((item) => {
+    if (['cricket', 'cricket_t20', 'cricket_odi', 'cricket_test_match'].includes(item) && !result.includes('cricket')) result.push('cricket');
+    if (['football', 'soccer', 'soccer_epl', 'epl', 'uefa', 'fifa'].includes(item) && !result.includes('football')) result.push('football');
+  });
+
+  return result.length ? result : ['cricket', 'football'];
+}
+
+function combineStats(results = [], mode = 'sportmonks_multi') {
+  const stats = {
+    mode,
+    sports: results.length,
+    events: 0,
+    markets: 0,
+    live: 0,
+    finished: 0,
+    skippedSports: [],
+    results: {},
+  };
+
+  results.forEach(({ sport, status, value, reason }) => {
+    if (status === 'rejected') {
+      stats.skippedSports.push({ sport, message: reason?.message || String(reason || 'sync failed') });
+      stats.results[sport] = { failed: true, message: reason?.message || String(reason || 'sync failed') };
+      return;
+    }
+
+    stats.results[sport] = value;
+    if (value?.skipped) {
+      stats.skippedSports.push({ sport, message: value.reason || 'skipped' });
+      return;
+    }
+
+    stats.events += Number(value?.events || 0);
+    stats.markets += Number(value?.markets || 0);
+    stats.live += Number(value?.live || 0);
+    stats.finished += Number(value?.finished || 0);
+  });
+
+  stats.status = stats.events ? (stats.skippedSports.length ? 'partial' : 'success') : 'failed';
+  return stats;
+}
+
+async function runSportmonksSync(kind = 'odds', options = {}) {
+  const sports = requestedSportmonksSports();
+  const tasks = [];
+
+  if (sports.includes('cricket')) {
+    tasks.push({
+      sport: 'cricket',
+      run: () => (kind === 'scores' ? syncSportmonksCricketScores(options) : syncSportmonksCricketOdds(options)),
+    });
+  }
+
+  if (sports.includes('football')) {
+    tasks.push({
+      sport: 'football',
+      run: () => (kind === 'scores' ? syncSportmonksFootballScores(options) : syncSportmonksFootballOdds(options)),
+    });
+  }
+
+  if (!tasks.length) return { skipped: true, reason: 'No SportMonks sports enabled in SPORTS_AUTO_SPORT_KEYS' };
+
+  const settled = await Promise.all(tasks.map(async (task) => {
+    try {
+      return { sport: task.sport, status: 'fulfilled', value: await task.run() };
+    } catch (error) {
+      return { sport: task.sport, status: 'rejected', reason: error };
+    }
+  }));
+
+  return combineStats(settled, kind === 'scores' ? 'sportmonks_multi_scores' : 'sportmonks_multi_odds');
+}
+
+async function clearSportmonksStaleEvents() {
+  const sports = requestedSportmonksSports();
+  const results = {};
+  if (sports.includes('cricket') && sportmonksCricketConfigured()) results.cricket = await clearSportmonksCricketStaleEvents();
+  if (sports.includes('football') && sportmonksFootballConfigured()) results.football = await clearSportmonksFootballStaleEvents();
+  return results;
 }
 
 export async function syncSportsOdds({ force = false } = {}) {
@@ -555,7 +649,7 @@ export async function syncSportsOdds({ force = false } = {}) {
   if (!force && Date.now() - lastOddsSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (oddsSyncPromise) return oddsSyncPromise;
 
-  oddsSyncPromise = (useSportmonksProvider() ? syncSportmonksCricketOdds({ force }) : useApiSportsProvider() ? syncApiSportsOdds() : syncTheOddsApiOdds())
+  oddsSyncPromise = (useSportmonksProvider() ? runSportmonksSync('odds', { force }) : useApiSportsProvider() ? syncApiSportsOdds() : syncTheOddsApiOdds())
     .finally(() => {
       lastOddsSyncAt = Date.now();
       oddsSyncPromise = null;
@@ -569,7 +663,7 @@ export async function syncSportsScores({ force = false } = {}) {
   if (!force && Date.now() - lastScoreSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (scoreSyncPromise) return scoreSyncPromise;
 
-  scoreSyncPromise = (useSportmonksProvider() ? syncSportmonksCricketScores({ force }) : useApiSportsProvider() ? syncApiSportsScores() : syncTheOddsApiScores())
+  scoreSyncPromise = (useSportmonksProvider() ? runSportmonksSync('scores', { force }) : useApiSportsProvider() ? syncApiSportsScores() : syncTheOddsApiScores())
     .finally(() => {
       lastScoreSyncAt = Date.now();
       scoreSyncPromise = null;
@@ -579,7 +673,7 @@ export async function syncSportsScores({ force = false } = {}) {
 }
 
 export async function clearStaleSportsEvents() {
-  if (useSportmonksProvider()) return clearSportmonksCricketStaleEvents();
+  if (useSportmonksProvider()) return clearSportmonksStaleEvents();
   return useApiSportsProvider() ? clearApiSportsStaleEvents() : deactivateStaleSportsEvents('theoddsapi');
 }
 

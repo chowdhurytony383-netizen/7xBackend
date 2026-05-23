@@ -1,5 +1,6 @@
 import { getSportmonksMatchDetails } from './sportmonksDetailsService.js';
 import { getSportmonksCricketMatchDetails, sportmonksCricketConfigured } from './sportmonksCricketService.js';
+import { sportmonksFootballConfigured as sportmonksFootballProviderConfigured } from './sportmonksFootballService.js';
 import { apiSportsProviderConfigured, apiSportsSupportsEvent, getApiSportsMatchDetails } from './apisportsDetailsService.js';
 
 function boolEnv(name, fallback = false) {
@@ -9,11 +10,11 @@ function boolEnv(name, fallback = false) {
 }
 
 function sportmonksConfigured() {
-  return Boolean(process.env.SPORTMONKS_API_TOKEN) || sportmonksCricketConfigured();
+  return sportmonksFootballProviderConfigured() || sportmonksCricketConfigured();
 }
 
-function sportmonksFootballConfigured() {
-  return Boolean(process.env.SPORTMONKS_API_TOKEN);
+function sportmonksFootballDetailsConfigured() {
+  return sportmonksFootballProviderConfigured();
 }
 
 function footballLike(event = {}) {
@@ -22,8 +23,9 @@ function footballLike(event = {}) {
 }
 
 function cricketLike(event = {}) {
-  const clean = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.sport || ''} ${event.league || ''} ${event.provider || ''}`.toLowerCase();
-  return clean.includes('cricket') || clean.includes('sportmonks');
+  if (footballLike(event)) return false;
+  const clean = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.sport || ''} ${event.league || ''}`.toLowerCase();
+  return clean.includes('cricket') || String(event.sportKey || '').toLowerCase() === 'cricket';
 }
 
 function detailsEnabled() {
@@ -113,7 +115,7 @@ export async function getSportsMatchDetails(event = {}) {
 
   const providers = providerList();
   const canUseSportmonksCricket = providers.includes('sportmonks') && sportmonksCricketConfigured() && cricketLike(event);
-  const canUseSportmonksFootball = providers.includes('sportmonks') && sportmonksFootballConfigured() && footballLike(event);
+  const canUseSportmonksFootball = providers.includes('sportmonks') && sportmonksFootballDetailsConfigured() && footballLike(event);
   const canUseApiSports = (providers.includes('api-sports') || providers.includes('apisports')) && apiSportsProviderConfigured() && apiSportsSupportsEvent(event);
   const canUseTheOddsApi = canUseTheOddsApiBasicDetails(event);
 
@@ -148,6 +150,7 @@ export async function getSportsMatchDetails(event = {}) {
       league: event.league,
       sportmonksConfigured: sportmonksConfigured(),
       sportmonksCricketConfigured: sportmonksCricketConfigured(),
+      sportmonksFootballConfigured: sportmonksFootballDetailsConfigured(),
       apiSportsConfigured: apiSportsProviderConfigured(),
     },
   };

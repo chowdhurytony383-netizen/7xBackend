@@ -11,19 +11,25 @@ function ttlMs() {
   return Math.max(30, Number.isFinite(seconds) ? seconds : 120) * 1000;
 }
 
+function sportmonksFootballToken() {
+  return process.env.SPORTMONKS_FOOTBALL_API_TOKEN || process.env.SPORTMONKS_API_TOKEN || '';
+}
+
 function detailsEnabled() {
+  const provider = String(process.env.SPORTS_DETAILS_PROVIDER || process.env.SPORTS_DETAILS_PROVIDERS || '').toLowerCase();
+  const providers = provider.split(',').map((item) => item.trim()).filter(Boolean);
   return bool(process.env.SPORTS_DETAILS_ENABLED, false)
-    && String(process.env.SPORTS_DETAILS_PROVIDER || '').toLowerCase() === 'sportmonks'
-    && Boolean(process.env.SPORTMONKS_API_TOKEN);
+    && (provider === 'sportmonks' || provider === 'hybrid' || provider === 'all' || providers.includes('sportmonks'))
+    && Boolean(sportmonksFootballToken());
 }
 
 function baseUrl() {
-  return String(process.env.SPORTMONKS_BASE_URL || SPORTMONKS_DEFAULT_BASE).replace(/\/+$/, '');
+  return String(process.env.SPORTMONKS_FOOTBALL_BASE_URL || process.env.SPORTMONKS_BASE_URL || SPORTMONKS_DEFAULT_BASE).replace(/\/+$/, '');
 }
 
 function makeUrl(path, params = {}) {
   const url = new URL(`${baseUrl()}${path.startsWith('/') ? path : `/${path}`}`);
-  url.searchParams.set('api_token', process.env.SPORTMONKS_API_TOKEN || '');
+  url.searchParams.set('api_token', sportmonksFootballToken());
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
   });
@@ -168,6 +174,7 @@ function isFootballEvent(event = {}) {
 }
 
 function includesParam(level = 'full') {
+  if (process.env.SPORTMONKS_FOOTBALL_INCLUDE) return process.env.SPORTMONKS_FOOTBALL_INCLUDE;
   if (process.env.SPORTMONKS_INCLUDE) return process.env.SPORTMONKS_INCLUDE;
   if (level === 'date') return 'participants;league;state;scores;venue';
   return [
@@ -211,7 +218,16 @@ async function fetchFixtureByIdWithCache(fixtureId) {
   return fixture;
 }
 
+function cleanFootballFixtureId(value = '') {
+  return String(value || '').replace(/^football:/i, '').trim();
+}
+
 async function resolveFixture(event = {}) {
+  const directFixtureId = cleanFootballFixtureId(event.providerEventId || event.fixtureId || event.id);
+  if (/^\d+$/.test(directFixtureId)) {
+    return fetchFixtureByIdWithCache(directFixtureId);
+  }
+
   const candidates = [];
   const baseDate = event.commenceTime || event.dateTime || event.kickoffTime || new Date();
 

@@ -464,6 +464,7 @@ async function deactivateStaleSportmonksEvents() {
   const result = await SportsAutoEvent.updateMany(
     {
       provider: 'sportmonks',
+      sportKey: 'cricket',
       isActive: true,
       $or: [
         { completed: true },
@@ -475,7 +476,7 @@ async function deactivateStaleSportmonksEvents() {
   );
 
   const closedMarkets = await SportsAutoMarket.updateMany(
-    { provider: 'sportmonks', status: 'OPEN', updatedAt: { $lt: cutoff } },
+    { provider: 'sportmonks', providerEventId: { $not: /^football:/ }, status: 'OPEN', updatedAt: { $lt: cutoff } },
     { $set: { status: 'CLOSED' } }
   );
 
