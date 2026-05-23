@@ -258,6 +258,42 @@ function getOddsArray(fixture = {}) {
   return getArray(fixture.odds || fixture.odd || fixture.bookmaker_odds || fixture.markets);
 }
 
+function flattenSportmonksCricketOdds(fixture = {}) {
+  const odds = getOddsArray(fixture);
+  const flattened = [];
+
+  for (const odd of odds) {
+    const values = Array.isArray(odd?.value)
+      ? odd.value
+      : Array.isArray(odd?.values)
+        ? odd.values
+        : Array.isArray(odd?.outcomes)
+          ? odd.outcomes
+          : null;
+
+    if (values) {
+      for (const selection of values) {
+        flattened.push({
+          ...selection,
+          parentOddId: odd.id || odd.odd_id || null,
+          fixture_id: odd.fixture_id || odd.fixtureId || selection.fixture_id || selection.fixtureId,
+          market_id: odd.market_id || odd.marketId || selection.market_id || selection.marketId,
+          market: selection.market || odd.market,
+          market_description: selection.market_description || odd.market_description,
+          bookmaker_id: odd.bookmaker_id || odd.bookmakerId || selection.bookmaker_id || selection.bookmakerId,
+          bookmaker: selection.bookmaker || odd.bookmaker,
+          bookmaker_name: selection.bookmaker_name || odd.bookmaker_name,
+        });
+      }
+      continue;
+    }
+
+    flattened.push(odd);
+  }
+
+  return flattened;
+}
+
 function normalizeName(value = '') {
   return String(value || '')
     .toLowerCase()
@@ -303,7 +339,7 @@ function bookmakerName(odds = []) {
 }
 
 function normalizeSportmonksOdds(fixture = {}, providerEventId = '') {
-  const odds = getOddsArray(fixture);
+  const odds = flattenSportmonksCricketOdds(fixture);
   const selections = [];
   const seen = new Set();
 
@@ -386,7 +422,7 @@ async function upsertSportmonksCricketFixture(fixture = {}) {
           providerEventId,
           marketKey: 'h2h',
           marketName: 'Match Winner',
-          bookmaker: bookmakerName(getOddsArray(fixture)),
+          bookmaker: bookmakerName(flattenSportmonksCricketOdds(fixture)),
           selections,
           status: 'OPEN',
           lastProviderUpdate: new Date(),
