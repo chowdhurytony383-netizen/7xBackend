@@ -55,6 +55,20 @@ function shouldShowAllSportsProviders() {
   return String(process.env.SPORTS_SHOW_ALL_PROVIDERS || '').toLowerCase() === 'true';
 }
 
+function sportmonksOnlyMode() {
+  const provider = sportsProviderName();
+  return provider === 'sportmonks' || provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket';
+}
+
+function shouldUseLegacySportsMatchFallback(sportQuery = '') {
+  // Legacy SportsMatch contains old/manual demo rows. In SportMonks-only mode it must never
+  // leak into public sports APIs, otherwise cricket sync can be successful while football
+  // demo data is still returned from the fallback collection.
+  if (sportmonksOnlyMode() && !shouldShowAllSportsProviders()) return false;
+  if (sportQuery) return false;
+  return String(process.env.SPORTS_LEGACY_MATCH_FALLBACK || 'true').toLowerCase() === 'true';
+}
+
 function boolEnv(name, fallback = false) {
   const value = process.env[name];
   if (value === undefined || value === null || value === '') return fallback;
@@ -142,13 +156,32 @@ function visibleEventCutoff() {
 
 function visibleEventFilter(extra = {}) {
   const providerFilter = shouldShowAllSportsProviders() ? {} : { provider: sportsProviderName() };
+  const { $or: extraOr, ...restExtra } = extra || {};
+
+  const andFilters = [
+    {
+      ...providerFilter,
+      isActive: true,
+      completed: { $ne: true },
+      status: { $in: ['LIVE', 'UPCOMING'] },
+    },
+    {
+      // Cricket matches can stay LIVE for multiple days. Do not hide a live cricket
+      // match just because its original start time is older than the old-event cutoff.
+      $or: [
+        { status: 'LIVE' },
+        { commenceTime: { $gte: visibleEventCutoff() } },
+        { commenceTime: { $exists: false } },
+        { commenceTime: null },
+      ],
+    },
+  ];
+
+  if (extraOr) andFilters.push({ $or: extraOr });
+
   return {
-    ...providerFilter,
-    isActive: true,
-    completed: { $ne: true },
-    status: { $in: ['LIVE', 'UPCOMING'] },
-    commenceTime: { $gte: visibleEventCutoff() },
-    ...extra,
+    ...restExtra,
+    $and: andFilters,
   };
 }
 
@@ -392,6 +425,14 @@ export const categories = asyncHandler(async (_req, res) => {
   const ttl = cacheTtlMs('SPORTS_CATEGORIES_CACHE_SECONDS', 30);
   if (cacheFresh(categoriesCache, ttl)) return res.json(categoriesCache.payload);
 
+  if (sportmonksOnlyMode() && !shouldShowAllSportsProviders()) {
+    const dynamic = await categoriesFromEvents();
+    const items = dynamic.length ? dynamic : [CATEGORY_META.cricket];
+    const payload = { success: true, data: items, categories: items, sports: items, cached: false };
+    categoriesCache = { createdAt: Date.now(), payload };
+    return res.json(payload);
+  }
+
   const items = await SportsCategory.find({ isActive: true }).sort({ sortOrder: 1, name: 1 }).lean();
   if (items.length) {
     const merged = items.map(mergeCategoryWithMeta);
@@ -455,6 +496,12 @@ export const liveMatches = asyncHandler(async (req, res) => {
     return res.json(payload);
   }
 
+  if (!shouldUseLegacySportsMatchFallback(sportQuery)) {
+    const payload = { success: true, data: [], matches: [], liveMatches: [], events: [], cached: false };
+    liveMatchesCache = { createdAt: Date.now(), payload, cacheKey };
+    return res.json(payload);
+  }
+
   const matches = await SportsMatch.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).limit(50).lean();
   const payload = { success: true, data: matches, matches, liveMatches: matches, events: matches, cached: false };
   liveMatchesCache = { createdAt: Date.now(), payload, cacheKey };
@@ -482,6 +529,12 @@ export const matchOfTheDay = asyncHandler(async (_req, res) => {
   if (event) {
     const match = await formatAutoEvent(event);
     const payload = { success: true, data: match, match, matchOfTheDay: match, event: match, cached: false };
+    matchOfTheDayCache = { createdAt: Date.now(), payload };
+    return res.json(payload);
+  }
+
+  if (!shouldUseLegacySportsMatchFallback()) {
+    const payload = { success: true, data: null, match: null, matchOfTheDay: null, event: null, cached: false };
     matchOfTheDayCache = { createdAt: Date.now(), payload };
     return res.json(payload);
   }
