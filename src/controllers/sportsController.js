@@ -13,6 +13,7 @@ import { placeSportsBet, settleOpenSportsBets } from '../services/sportsBettingS
 import { getSportsMatchDetails, sportsDetailsConfigured } from '../services/sportsDetailsService.js';
 import { apiSportsOddsProviderConfigured } from '../services/apiSportsOddsProviderService.js';
 import { sportmonksCricketConfigured } from '../services/sportmonksCricketService.js';
+import { sportmonksFootballConfigured } from '../services/sportmonksFootballService.js';
 
 let backgroundSportsSyncPromise = null;
 let liveMatchesCache = { createdAt: 0, payload: null };
@@ -39,8 +40,16 @@ function sportsApiKeyConfigured() {
     return apiSportsOddsProviderConfigured();
   }
 
-  if (provider === 'sportmonks' || provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket') {
+  if (provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket') {
     return sportmonksCricketConfigured();
+  }
+
+  if (provider === 'sportmonks-football' || provider === 'sportmonks_football') {
+    return sportmonksFootballConfigured();
+  }
+
+  if (provider === 'sportmonks') {
+    return sportmonksCricketConfigured() || sportmonksFootballConfigured();
   }
 
   return Boolean(
@@ -57,7 +66,7 @@ function shouldShowAllSportsProviders() {
 
 function sportmonksOnlyMode() {
   const provider = sportsProviderName();
-  return provider === 'sportmonks' || provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket';
+  return provider === 'sportmonks' || provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket' || provider === 'sportmonks-football' || provider === 'sportmonks_football';
 }
 
 function shouldUseLegacySportsMatchFallback(sportQuery = '') {
@@ -134,6 +143,19 @@ function triggerBackgroundSportsSync(reason = 'request') {
 
 function cacheFresh(cache, ttlMs) {
   return cache?.payload && Date.now() - cache.createdAt < ttlMs;
+}
+
+function requestedSportmonksCategoryFallback() {
+  const provider = sportsProviderName();
+  if (provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket') return [CATEGORY_META.cricket];
+  if (provider === 'sportmonks-football' || provider === 'sportmonks_football') return [CATEGORY_META.football];
+
+  const raw = String(process.env.SPORTS_AUTO_SPORT_KEYS || 'cricket,football').toLowerCase();
+  if (raw.includes('all') || raw.includes('active') || raw.includes('football') || raw.includes('soccer')) {
+    if (raw.includes('cricket') || raw.includes('all') || raw.includes('active')) return [CATEGORY_META.cricket, CATEGORY_META.football];
+    return [CATEGORY_META.football];
+  }
+  return [CATEGORY_META.cricket];
 }
 
 const CATEGORY_META = {
@@ -427,7 +449,7 @@ export const categories = asyncHandler(async (_req, res) => {
 
   if (sportmonksOnlyMode() && !shouldShowAllSportsProviders()) {
     const dynamic = await categoriesFromEvents();
-    const items = dynamic.length ? dynamic : [CATEGORY_META.cricket];
+    const items = dynamic.length ? dynamic : requestedSportmonksCategoryFallback();
     const payload = { success: true, data: items, categories: items, sports: items, cached: false };
     categoriesCache = { createdAt: Date.now(), payload };
     return res.json(payload);
