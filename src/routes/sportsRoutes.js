@@ -25,7 +25,9 @@ router.post('/bets/place', protect, placeBet);
 router.post('/bets/place-multiple', protect, placeMultipleBets);
 router.get('/bets/my', protect, myBets);
 
+router.get('/auto/sync', protect, requireAdmin, syncNow);
 router.post('/auto/sync', protect, requireAdmin, syncNow);
+router.get('/auto/settle', protect, requireAdmin, settleNow);
 router.post('/auto/settle', protect, requireAdmin, settleNow);
 
 export default router;
