@@ -192,6 +192,89 @@ function visitorTeam(fixture = {}) {
   return fixture.visitorteam?.data || fixture.visitorteam || fixture.visitor_team?.data || fixture.visitor_team || fixture.awayTeam || fixture.away_team || {};
 }
 
+function normalizeText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\b(cc|ccc|club|team|the|men|women|xi|u19|u20|u21|u23)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function textTokens(value = '') {
+  return normalizeText(value).split(' ').filter(Boolean);
+}
+
+function nameScore(left = '', right = '') {
+  const a = textTokens(left);
+  const b = textTokens(right);
+  if (!a.length || !b.length) return 0;
+  const bSet = new Set(b);
+  const hits = a.filter((item) => bSet.has(item)).length;
+  const exact = normalizeText(left) === normalizeText(right) ? 0.55 : 0;
+  return Math.min(1, exact + hits / Math.max(a.length, b.length));
+}
+
+function eventTeamName(event = {}, side = 'home') {
+  const source = side === 'home' ? event.homeTeam : event.awayTeam;
+  if (typeof source === 'string') return source;
+  return source?.name || source?.displayName || source?.title || '';
+}
+
+function addDaysToDate(value, offset = 0) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return addDays(offset);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date;
+}
+
+function cricketMatchThreshold() {
+  const parsed = Number(process.env.SPORTMONKS_CRICKET_MATCH_THRESHOLD || process.env.SPORTS_DETAILS_MATCH_THRESHOLD || 0.35);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0.35;
+}
+
+function fixtureMatchScore(fixture = {}, event = {}) {
+  const local = localTeam(fixture);
+  const visitor = visitorTeam(fixture);
+  const localName = teamName(local, fixture.localteam_id || '');
+  const visitorName = teamName(visitor, fixture.visitorteam_id || '');
+  const homeName = eventTeamName(event, 'home') || event.home || event.raw?.home_team || '';
+  const awayName = eventTeamName(event, 'away') || event.away || event.raw?.away_team || '';
+
+  const direct = (nameScore(homeName, localName) + nameScore(awayName, visitorName)) / 2;
+  const reverse = (nameScore(homeName, visitorName) + nameScore(awayName, localName)) / 2;
+  return Math.max(direct, reverse);
+}
+
+async function findSportmonksCricketFixtureForEvent(event = {}) {
+  const baseDate = event.commenceTime || event.dateTime || event.startTime || event.kickoffTime || event.raw?.commence_time || new Date();
+  const range = `${dateKey(addDaysToDate(baseDate, -1))},${dateKey(addDaysToDate(baseDate, 1))}`;
+  const params = {
+    include: includeParam(),
+    'filter[starts_between]': range,
+    per_page: 100,
+  };
+
+  try {
+    const response = await fetchSportmonksCricket('/fixtures', params);
+    const fixtures = getArray(response?.data || response);
+    let best = null;
+    let bestScore = 0;
+    fixtures.forEach((fixture) => {
+      const score = fixtureMatchScore(fixture, event);
+      if (score > bestScore) {
+        best = fixture;
+        bestScore = score;
+      }
+    });
+
+    return bestScore >= cricketMatchThreshold() ? best : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 function getTeamId(team = {}) {
   if (!team || typeof team !== 'object') return undefined;
   return team.id || team.team_id || team.localteam_id || team.visitorteam_id;
@@ -609,34 +692,50 @@ export async function getSportmonksCricketMatchDetails(event = {}) {
     };
   }
 
-  const fixtureId = event.providerEventId || event.raw?.id;
-  if (!fixtureId) {
-    return {
-      enabled: true,
-      provider: 'sportmonks',
-      sport: 'cricket',
-      available: false,
-      message: 'SportMonks Cricket fixture id is missing.',
-      raw: null,
-    };
-  }
-
-  const cacheKey = `fixture:${fixtureId}`;
+  const eventProvider = String(event.provider || '').toLowerCase();
+  const directFixtureId = eventProvider === 'sportmonks' ? (event.providerEventId || event.raw?.id) : (event.raw?.sportmonksFixtureId || event.raw?.sportmonks_fixture_id || '');
+  const cacheKey = directFixtureId
+    ? `fixture:${directFixtureId}`
+    : `match:${event._id || event.id || event.providerEventId || event.homeTeam || ''}:${event.awayTeam || ''}:${event.commenceTime || event.raw?.commence_time || ''}`;
   const cached = detailsCache.get(cacheKey);
   if (cached && Date.now() - cached.createdAt < cacheTtlMs()) return cached.data;
 
   try {
-    const response = await fetchSportmonksCricket(`/fixtures/${encodeURIComponent(fixtureId)}`, { include: includeParam() });
-    const fixture = response?.data || response || event.raw || null;
+    let fixture = null;
+    let fixtureId = directFixtureId;
+
+    if (fixtureId) {
+      const response = await fetchSportmonksCricket(`/fixtures/${encodeURIComponent(fixtureId)}`, { include: includeParam() });
+      fixture = response?.data || response || null;
+    }
+
+    if (!fixture) {
+      fixture = await findSportmonksCricketFixtureForEvent(event);
+      fixtureId = fixture?.id || fixture?.fixture_id || '';
+    }
+
+    if (!fixture) {
+      const result = {
+        enabled: true,
+        provider: 'sportmonks',
+        sport: 'cricket',
+        available: false,
+        message: 'No matching SportMonks Cricket fixture found for this odds event. Basic odds details can still be shown from The Odds API.',
+        raw: null,
+      };
+      detailsCache.set(cacheKey, { createdAt: Date.now(), data: result });
+      return result;
+    }
+
     const local = localTeam(fixture);
     const visitor = visitorTeam(fixture);
     const details = {
       enabled: true,
       provider: 'sportmonks',
       sport: 'cricket',
-      available: Boolean(fixture),
+      available: true,
       fixtureId,
-      name: fixture?.name || `${teamName(local, event.homeTeam)} vs ${teamName(visitor, event.awayTeam)}`,
+      name: fixture?.name || `${teamName(local, eventTeamName(event, 'home') || event.homeTeam)} vs ${teamName(visitor, eventTeamName(event, 'away') || event.awayTeam)}`,
       startingAt: readStartingAt(fixture),
       status: normalizeStatus(fixture),
       league: fixture?.league?.data || fixture?.league || null,
@@ -645,13 +744,13 @@ export async function getSportmonksCricketMatchDetails(event = {}) {
       venue: fixture?.venue?.data || fixture?.venue || null,
       homeTeam: {
         id: getTeamId(local) || fixture?.localteam_id,
-        name: teamName(local, event.homeTeam),
+        name: teamName(local, eventTeamName(event, 'home') || event.homeTeam),
         logo: teamLogo(local),
         raw: local || null,
       },
       awayTeam: {
         id: getTeamId(visitor) || fixture?.visitorteam_id,
-        name: teamName(visitor, event.awayTeam),
+        name: teamName(visitor, eventTeamName(event, 'away') || event.awayTeam),
         logo: teamLogo(visitor),
         raw: visitor || null,
       },
@@ -669,6 +768,7 @@ export async function getSportmonksCricketMatchDetails(event = {}) {
       raw: fixture,
     };
     detailsCache.set(cacheKey, { createdAt: Date.now(), data: details });
+    if (fixtureId) detailsCache.set(`fixture:${fixtureId}`, { createdAt: Date.now(), data: details });
     return details;
   } catch (error) {
     return {
@@ -682,3 +782,4 @@ export async function getSportmonksCricketMatchDetails(event = {}) {
     };
   }
 }
+
