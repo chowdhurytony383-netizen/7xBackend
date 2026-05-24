@@ -12,7 +12,7 @@ import { createUniqueUserId, generatePassword } from '../utils/identity.js';
 import { currencyForResolvedCountry, resolveRegistrationCountry } from '../utils/requestCountry.js';
 import { saveUploadedFile } from '../utils/cloudinary.js';
 import { triggerCryptoAddressCreationForUser } from '../services/cryptoAddressService.js';
-import { safelyAwardSignupBonus } from '../services/signupBonusService.js';
+import { markFirstDepositBonusProfileCompleteIfReady } from '../services/firstDepositBonusService.js';
 import { buildRegistrationAttribution,
   buildRegistrationMeta, createUniqueInviteCode, markRegistrationForAffiliate } from '../services/affiliateAttributionService.js';
 
@@ -137,10 +137,10 @@ export const register = asyncHandler(async (req, res) => {
   await markRegistrationForAffiliate(user);
   triggerCryptoAddressCreationForUser(user);
 
-  // Award Sign Up Bonus for every normal/email registration.
-  // safelyAwardSignupBonus is idempotent, so it will not double-credit if a bonus already exists.
-  const signupBonus = await safelyAwardSignupBonus(user);
-  const latestUser = signupBonus.user || user;
+  // Welcome/signup bonus is disabled. First-deposit bonus is handled only after
+  // the user submits required account information and then makes the first eligible deposit.
+  const signupBonus = { awarded: false, amount: 0, currency, requiredTurnover: 0, reason: 'welcome_bonus_disabled' };
+  const latestUser = user;
 
   await createAndSendVerification(latestUser);
   const tokens = setAuthCookies(res, latestUser);
@@ -200,10 +200,10 @@ export const oneClickRegister = asyncHandler(async (req, res) => {
   await markRegistrationForAffiliate(user);
   triggerCryptoAddressCreationForUser(user);
 
-  // Award Sign Up Bonus for one-click registrations too.
-  // The service is safe/idempotent and prevents duplicate signup bonuses.
-  const signupBonus = await safelyAwardSignupBonus(user);
-  const latestUser = signupBonus.user || user;
+  // Welcome/signup bonus is disabled. First-deposit bonus starts only after
+  // the user submits required account information and then makes a deposit.
+  const signupBonus = { awarded: false, amount: 0, currency, requiredTurnover: 0, reason: 'welcome_bonus_disabled' };
+  const latestUser = user;
 
   const tokens = setAuthCookies(res, latestUser);
   res.status(201).json({
@@ -303,6 +303,9 @@ export const updateProfile = asyncHandler(async (req, res) => {
 
   if (req.body.dateOfBirth) req.user.dateOfBirth = new Date(req.body.dateOfBirth);
   await req.user.save();
+  await markFirstDepositBonusProfileCompleteIfReady(req.user).catch((error) => {
+    console.error('First deposit bonus profile marker failed:', error.message);
+  });
   res.json({ success: true, message: 'Profile updated', data: sanitizeUser(req.user) });
 });
 

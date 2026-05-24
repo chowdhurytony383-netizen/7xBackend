@@ -1,5 +1,6 @@
 import Verification from '../models/Verification.js';
 import { getWithdrawalProfileStatus } from '../services/withdrawalGuardService.js';
+import { markFirstDepositBonusProfileCompleteIfReady } from '../services/firstDepositBonusService.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { optionalString, requireEmail } from '../utils/validation.js';
 
@@ -93,6 +94,9 @@ export const submitVerification = asyncHandler(async (req, res) => {
   }
 
   await req.user.save();
+  await markFirstDepositBonusProfileCompleteIfReady(req.user).catch((error) => {
+    console.error('First deposit bonus profile marker failed:', error.message);
+  });
 
   const profileStatus = await getWithdrawalProfileStatus(req.user);
 

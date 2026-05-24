@@ -35,8 +35,8 @@ export const getMyTransactions = asyncHandler(async (req, res) => {
     transactions,
     signupBonusSummary,
     firstDepositBonusSummary,
-    // Kept for older frontend builds. The Wallet page uses signupBonusSummary first.
-    bonusSummary: signupBonusSummary,
+    // Active bonus is the first-deposit bonus. Signup bonus is kept only for legacy records.
+    bonusSummary: firstDepositBonusSummary,
   });
 });
 
