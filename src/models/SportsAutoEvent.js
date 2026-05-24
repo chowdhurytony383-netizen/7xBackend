@@ -3,6 +3,11 @@ import mongoose from 'mongoose';
 const scoreSideSchema = new mongoose.Schema({
   name: { type: String, default: '' },
   score: { type: Number, default: 0 },
+  wickets: { type: Number, default: null },
+  overs: { type: String, default: '' },
+  inning: { type: Number, default: null },
+  label: { type: String, default: '' },
+  display: { type: String, default: '' },
 }, { _id: false });
 
 const sportsAutoEventSchema = new mongoose.Schema({
