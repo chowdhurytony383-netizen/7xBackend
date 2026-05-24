@@ -293,9 +293,20 @@ function teamObject(name, sportKey = '') {
   };
 }
 
-function scoreValue(event, teamName) {
-  const found = (event.scores || []).find((score) => String(score.name || '').toLowerCase() === String(teamName || '').toLowerCase());
-  return Number(found?.score || 0);
+function scoreEntryForTeam(event, teamName) {
+  return (event.scores || []).find((score) => String(score.name || '').toLowerCase() === String(teamName || '').toLowerCase());
+}
+
+function scoreDisplayValue(event, teamName) {
+  const found = scoreEntryForTeam(event, teamName);
+  if (!found) return 0;
+  if (found.display) return found.display;
+
+  const score = Number(found.score || 0);
+  const scoreText = Number.isFinite(score) ? String(score) : String(found.score || 0);
+  const wickets = found.wickets !== undefined && found.wickets !== null && found.wickets !== '' ? `/${found.wickets}` : '';
+  const overs = found.overs ? ` (${found.overs} ov)` : '';
+  return `${scoreText}${wickets}${overs}`;
 }
 
 function stableId(...parts) {
@@ -382,8 +393,8 @@ function marketToOdds(market, event = {}) {
 
 function formatAutoEventFromMarket(event, market = null) {
   const odds = marketToOdds(market, event);
-  const homeScore = scoreValue(event, event.homeTeam);
-  const awayScore = scoreValue(event, event.awayTeam);
+  const homeScore = scoreDisplayValue(event, event.homeTeam);
+  const awayScore = scoreDisplayValue(event, event.awayTeam);
   const status = event.completed ? 'Finished' : event.status === 'LIVE' ? 'Live' : 'Upcoming';
   const category = categoryForEvent(event);
 
@@ -405,6 +416,7 @@ function formatAutoEventFromMarket(event, market = null) {
     homeTeam: teamObject(event.homeTeam, event.sportKey),
     awayTeam: teamObject(event.awayTeam, event.sportKey),
     score: { home: homeScore, away: awayScore },
+    scores: event.scores || [],
     status,
     markets: odds,
     odds,
