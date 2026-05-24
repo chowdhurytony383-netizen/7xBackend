@@ -116,11 +116,8 @@ export const env = {
   AGENT_COMMISSION_PAYOUT_TIMEZONE: process.env.AGENT_COMMISSION_PAYOUT_TIMEZONE || 'Asia/Dhaka',
   AGENT_COMMISSION_PAYOUT_CHECK_MS: Number(process.env.AGENT_COMMISSION_PAYOUT_CHECK_MS || 60 * 60 * 1000),
 
-  // New account signup bonus.
-  // Default: every newly registered account receives the equivalent of BDT 100
-  // in the user's registered currency. Withdrawal requires 2x wagering, so BDT
-  // 100 bonus requires BDT 200 equivalent in bets.
-  SIGNUP_BONUS_ENABLED: String(process.env.SIGNUP_BONUS_ENABLED || 'true').toLowerCase() === 'true',
+  // Welcome/signup bonus is disabled. The active promo is first-deposit bonus after profile submission.
+  SIGNUP_BONUS_ENABLED: String(process.env.SIGNUP_BONUS_ENABLED || 'false').toLowerCase() === 'true',
   SIGNUP_BONUS_BASE_AMOUNT_BDT: Number(process.env.SIGNUP_BONUS_BASE_AMOUNT_BDT || 100),
   SIGNUP_BONUS_TURNOVER_MULTIPLIER: Number(process.env.SIGNUP_BONUS_TURNOVER_MULTIPLIER || 2),
   SIGNUP_BONUS_BDT_RATES_JSON: process.env.SIGNUP_BONUS_BDT_RATES_JSON || '',
@@ -129,9 +126,16 @@ export const env = {
   SIGNUP_BONUS_USE_LIVE_RATES: String(process.env.SIGNUP_BONUS_USE_LIVE_RATES || 'true').toLowerCase() === 'true',
   SIGNUP_BONUS_RATE_CACHE_MS: Number(process.env.SIGNUP_BONUS_RATE_CACHE_MS || 6 * 60 * 60 * 1000),
 
-  // Legacy first-deposit bonus is disabled by default because the active rule is
-  // now the signup bonus above. Set true only if you intentionally want both.
-  FIRST_DEPOSIT_BONUS_ENABLED: String(process.env.FIRST_DEPOSIT_BONUS_ENABLED || 'false').toLowerCase() === 'true',
+  // First deposit bonus: after required profile information is submitted, the next successful deposit gets 100% bonus.
+  FIRST_DEPOSIT_BONUS_ENABLED: String(process.env.FIRST_DEPOSIT_BONUS_ENABLED || 'true').toLowerCase() === 'true',
+  FIRST_DEPOSIT_BONUS_REQUIRED_FIELDS: process.env.FIRST_DEPOSIT_BONUS_REQUIRED_FIELDS || 'fullName,email,address',
+  FIRST_DEPOSIT_BONUS_CAP_ENABLED: String(process.env.FIRST_DEPOSIT_BONUS_CAP_ENABLED || 'false').toLowerCase() === 'true',
+  FIRST_DEPOSIT_BONUS_BASE_CAP_BDT: Number(process.env.FIRST_DEPOSIT_BONUS_BASE_CAP_BDT || 15000),
+  FIRST_DEPOSIT_BONUS_BDT_RATES_JSON: process.env.FIRST_DEPOSIT_BONUS_BDT_RATES_JSON || '',
+  FIRST_DEPOSIT_BONUS_CAPS_JSON: process.env.FIRST_DEPOSIT_BONUS_CAPS_JSON || '',
+  FIRST_DEPOSIT_BONUS_EXCHANGE_API_URL: process.env.FIRST_DEPOSIT_BONUS_EXCHANGE_API_URL || '',
+  FIRST_DEPOSIT_BONUS_USE_LIVE_RATES: String(process.env.FIRST_DEPOSIT_BONUS_USE_LIVE_RATES || 'true').toLowerCase() === 'true',
+  FIRST_DEPOSIT_BONUS_RATE_CACHE_MS: Number(process.env.FIRST_DEPOSIT_BONUS_RATE_CACHE_MS || 6 * 60 * 60 * 1000),
 
   // Withdrawal security rules.
   // Account/KYC document verification is not required for withdrawal by default.
@@ -142,9 +146,9 @@ export const env = {
   WITHDRAW_TURNOVER_MULTIPLIER: Number(process.env.WITHDRAW_TURNOVER_MULTIPLIER || 1),
 
   // Optional split turnover rules: deposit and bonus can have different multipliers.
-  // Example: deposit 1000 => turnover 500 when WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER=0.5.
-  WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER: process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER === undefined ? undefined : Number(process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER),
-  // Example: signup bonus 100 => turnover 200 when WITHDRAW_BONUS_TURNOVER_MULTIPLIER=2.
+  // Example: deposit 1000 => turnover 1000 when WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER=1.
+  WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER: process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER === undefined ? 1 : Number(process.env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER),
+  // Example: first deposit bonus 100 => turnover 200 when WITHDRAW_BONUS_TURNOVER_MULTIPLIER=2.
   WITHDRAW_BONUS_TURNOVER_MULTIPLIER: process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER === undefined ? 2 : Number(process.env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER),
 
   // Free/low-cost automatic sports betting system.
