@@ -107,11 +107,9 @@ const userSchema = new mongoose.Schema({
 
   wallet: { type: Number, default: 0, min: 0 },
 
-  vipLevel: { type: String, trim: true, lowercase: true, default: 'none', index: true },
-  vipLevelName: { type: String, trim: true, default: 'No VIP' },
-  vipMonthlyTurnover: { type: Number, default: 0, min: 0 },
-  vipMonthlyNetLoss: { type: Number, default: 0, min: 0 },
-  vipLastCalculatedAt: Date,
+  // First-deposit bonus becomes eligible only after required profile information is submitted.
+  // Deposits made before this timestamp are intentionally ignored for the first-deposit bonus.
+  firstDepositBonusProfileCompletedAt: Date,
 
   // First deposit bonus state. Kept on the user document so a rejected/cancelled
   // first-deposit bonus cannot be claimed again later.
