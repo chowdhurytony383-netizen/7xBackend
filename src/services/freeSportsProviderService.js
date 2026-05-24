@@ -17,23 +17,53 @@ const DEFAULT_SPORT_KEYS = [
   'soccer_italy_serie_a',
   'soccer_germany_bundesliga',
   'soccer_france_ligue_one',
-  'cricket_test_match',
+  'cricket_ipl',
+  'cricket_t20_blast',
+  'cricket_big_bash',
+  'cricket_psl',
+  'cricket_international_t20',
   'cricket_odi',
-  'cricket_t20',
+  'cricket_test_match',
   'basketball_nba',
-  'tennis_atp_singles',
-  'tennis_wta_singles',
+  'tennis_atp_aus_open_singles',
+  'tennis_wta_aus_open_singles',
+  'baseball_mlb',
+  'icehockey_nhl',
+  'americanfootball_nfl',
+  'mma_mixed_martial_arts',
 ];
 
-const THE_ODDS_SPORT_ALIASES = {
+const THE_ODDS_SPORT_GROUPS = {
+  football: ['soccer_'],
+  soccer: ['soccer_'],
+  cricket: ['cricket_'],
+  basketball: ['basketball_'],
+  tennis: ['tennis_'],
+  hockey: ['icehockey_'],
+  icehockey: ['icehockey_'],
+  baseball: ['baseball_'],
+  americanfootball: ['americanfootball_'],
+  nfl: ['americanfootball_nfl'],
+  rugby: ['rugbyleague_', 'rugbyunion_'],
+  volleyball: ['volleyball'],
+  handball: ['handball_'],
+  mma: ['mma_'],
+  boxing: ['boxing_'],
+  afl: ['aussierules_'],
+  aussierules: ['aussierules_'],
+};
+
+const THE_ODDS_STATIC_ALIASES = {
   football: [
     'soccer_epl',
     'soccer_uefa_champs_league',
     'soccer_uefa_europa_league',
+    'soccer_uefa_europa_conference_league',
     'soccer_spain_la_liga',
     'soccer_italy_serie_a',
     'soccer_germany_bundesliga',
     'soccer_france_ligue_one',
+    'soccer_usa_mls',
     'soccer_conmebol_copa_libertadores',
     'soccer_conmebol_copa_sudamericana',
   ],
@@ -41,22 +71,51 @@ const THE_ODDS_SPORT_ALIASES = {
     'soccer_epl',
     'soccer_uefa_champs_league',
     'soccer_uefa_europa_league',
+    'soccer_uefa_europa_conference_league',
     'soccer_spain_la_liga',
     'soccer_italy_serie_a',
     'soccer_germany_bundesliga',
     'soccer_france_ligue_one',
+    'soccer_usa_mls',
     'soccer_conmebol_copa_libertadores',
     'soccer_conmebol_copa_sudamericana',
   ],
-  cricket: ['cricket_test_match', 'cricket_odi', 'cricket_t20'],
-  basketball: ['basketball_nba', 'basketball_ncaab', 'basketball_euroleague'],
-  tennis: ['tennis_atp_singles', 'tennis_wta_singles'],
-  hockey: ['icehockey_nhl', 'icehockey_sweden_hockey_league', 'icehockey_world_championship'],
-  rugby: ['rugbyleague_nrl', 'rugbyunion_super_rugby'],
+  cricket: [
+    'cricket_ipl',
+    'cricket_t20_blast',
+    'cricket_big_bash',
+    'cricket_psl',
+    'cricket_caribbean_premier_league',
+    'cricket_international_t20',
+    'cricket_odi',
+    'cricket_test_match',
+    'cricket_t20_world_cup',
+    'cricket_icc_world_cup',
+    'cricket_the_hundred',
+  ],
+  basketball: ['basketball_nba', 'basketball_ncaab', 'basketball_euroleague', 'basketball_wnba'],
+  tennis: [
+    'tennis_atp_aus_open_singles',
+    'tennis_atp_french_open',
+    'tennis_atp_wimbledon',
+    'tennis_atp_us_open',
+    'tennis_wta_aus_open_singles',
+    'tennis_wta_french_open',
+    'tennis_wta_wimbledon',
+    'tennis_wta_us_open',
+  ],
+  hockey: ['icehockey_nhl', 'icehockey_sweden_hockey_league', 'icehockey_sweden_allsvenskan'],
+  icehockey: ['icehockey_nhl', 'icehockey_sweden_hockey_league', 'icehockey_sweden_allsvenskan'],
+  rugby: ['rugbyleague_nrl', 'rugbyunion_six_nations', 'rugbyunion_super_rugby'],
   volleyball: ['volleyball'],
   baseball: ['baseball_mlb', 'baseball_npb', 'baseball_kbo'],
+  americanfootball: ['americanfootball_nfl', 'americanfootball_ncaaf', 'americanfootball_cfl'],
+  nfl: ['americanfootball_nfl'],
   boxing: ['boxing_boxing'],
   mma: ['mma_mixed_martial_arts'],
+  handball: ['handball_germany_bundesliga'],
+  afl: ['aussierules_afl'],
+  aussierules: ['aussierules_afl'],
 };
 
 const DEFAULT_PRIORITY_SPORT_PREFIXES = [
@@ -100,18 +159,46 @@ function normalizeRequestedSportKey(value = '') {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
 }
 
-function expandConfiguredSportKeys(items = []) {
+function uniqueKeys(keys = []) {
+  return keys.filter((key, index, list) => key && list.indexOf(key) === index);
+}
+
+function keyMatchesGroup(key = '', prefixes = []) {
+  const normalizedKey = normalizeRequestedSportKey(key);
+  return prefixes.some((prefix) => {
+    const normalizedPrefix = normalizeRequestedSportKey(prefix);
+    return normalizedKey === normalizedPrefix || normalizedKey.startsWith(normalizedPrefix);
+  });
+}
+
+function maxKeysPerRequestedGroup() {
+  const value = Number(process.env.SPORTS_MAX_KEYS_PER_GROUP || 1);
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : 1;
+}
+
+function expandConfiguredSportKeys(items = [], activeKeys = []) {
   const expanded = [];
+  const active = Array.isArray(activeKeys) ? activeKeys.map(normalizeRequestedSportKey).filter(Boolean) : [];
+  const perGroupLimit = maxKeysPerRequestedGroup();
+
   items.forEach((item) => {
     const clean = normalizeRequestedSportKey(item);
-    if (!clean || clean === 'all' || clean === 'active') return;
+    if (!clean || clean === 'all' || clean === 'active' || clean === '*') return;
 
-    const aliases = THE_ODDS_SPORT_ALIASES[clean];
-    if (aliases?.length) expanded.push(...aliases);
-    else expanded.push(clean);
+    const groupPrefixes = THE_ODDS_SPORT_GROUPS[clean];
+    if (groupPrefixes?.length) {
+      const activeMatches = active.filter((key) => keyMatchesGroup(key, groupPrefixes));
+      const fallbackMatches = THE_ODDS_STATIC_ALIASES[clean] || [];
+      expanded.push(...(activeMatches.length ? activeMatches : fallbackMatches).slice(0, perGroupLimit));
+      return;
+    }
+
+    const aliases = THE_ODDS_STATIC_ALIASES[clean];
+    if (aliases?.length) expanded.push(...aliases.slice(0, perGroupLimit));
+    else if (!active.length || active.includes(clean)) expanded.push(clean);
   });
 
-  return expanded.filter((key, index, list) => key && list.indexOf(key) === index);
+  return uniqueKeys(expanded);
 }
 
 function sportPriorityIndex(sportKey = '') {
@@ -318,8 +405,7 @@ async function fetchActiveSportKeys() {
       .map((sport) => String(sport.key || '').trim())
       .filter(Boolean);
 
-    const maxSports = Math.max(1, Number(env.SPORTS_AUTO_MAX_SPORTS_PER_SYNC || 12));
-    cachedActiveSportKeys = sortSportKeysByPriority(sportKeys).slice(0, maxSports);
+    cachedActiveSportKeys = sortSportKeysByPriority(sportKeys);
     lastActiveSportsSyncAt = Date.now();
     return cachedActiveSportKeys.length ? cachedActiveSportKeys : DEFAULT_SPORT_KEYS;
   })().finally(() => {
@@ -330,10 +416,16 @@ async function fetchActiveSportKeys() {
 }
 
 async function getConfiguredSportKeys() {
-  if (isAllSportsMode()) return fetchActiveSportKeys();
+  const maxSports = Math.max(1, Number(env.SPORTS_AUTO_MAX_SPORTS_PER_SYNC || 12));
+  const activeKeys = await fetchActiveSportKeys().catch(() => []);
+
+  if (isAllSportsMode()) {
+    return sortSportKeysByPriority(activeKeys.length ? activeKeys : DEFAULT_SPORT_KEYS).slice(0, maxSports);
+  }
+
   const requested = csv(process.env.SPORTS_AUTO_SPORT_KEYS || env.SPORTS_AUTO_SPORT_KEYS || '', DEFAULT_SPORT_KEYS);
-  const expanded = expandConfiguredSportKeys(requested);
-  return expanded.length ? expanded : DEFAULT_SPORT_KEYS;
+  const expanded = expandConfiguredSportKeys(requested, activeKeys);
+  return (expanded.length ? expanded : sortSportKeysByPriority(DEFAULT_SPORT_KEYS)).slice(0, maxSports);
 }
 
 async function upsertOddsEvent(providerEvent, sportKey) {

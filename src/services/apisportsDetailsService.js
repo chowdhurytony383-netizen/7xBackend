@@ -172,15 +172,15 @@ function nameScore(left = '', right = '') {
 
 function detectSport(event = {}) {
   const clean = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.sport || ''} ${event.league || ''}`.toLowerCase();
-  if (clean.includes('soccer') || clean.includes('football') || clean.includes('football_epl') || clean.includes('epl') || clean.includes('uefa') || clean.includes('fifa') || clean.includes('la_liga') || clean.includes('bundesliga') || clean.includes('serie_a')) return 'football';
-  if (clean.includes('basketball') || clean.includes('basket') || clean.includes('nba') || clean.includes('ncaab')) return 'basketball';
-  if (clean.includes('baseball') || clean.includes('mlb')) return 'baseball';
-  if (clean.includes('icehockey') || clean.includes('hockey') || clean.includes('nhl')) return 'hockey';
   if (clean.includes('americanfootball') || clean.includes('american football') || clean.includes('nfl') || clean.includes('ncaaf') || clean.includes('cfl')) return 'americanfootball';
+  if (clean.includes('aussierules') || clean.includes('aussie') || clean.includes('afl')) return 'afl';
+  if (clean.includes('soccer') || clean.includes('football') || clean.includes('epl') || clean.includes('uefa') || clean.includes('fifa') || clean.includes('la_liga') || clean.includes('bundesliga') || clean.includes('serie_a')) return 'football';
+  if (clean.includes('basketball') || clean.includes('basket') || clean.includes('nba') || clean.includes('ncaab') || clean.includes('wnba')) return 'basketball';
+  if (clean.includes('baseball') || clean.includes('mlb') || clean.includes('npb') || clean.includes('kbo')) return 'baseball';
+  if (clean.includes('icehockey') || clean.includes('hockey') || clean.includes('nhl')) return 'hockey';
   if (clean.includes('rugby')) return 'rugby';
   if (clean.includes('volleyball')) return 'volleyball';
   if (clean.includes('handball')) return 'handball';
-  if (clean.includes('aussierules') || clean.includes('aussie') || clean.includes('afl')) return 'afl';
   if (clean.includes('mma') || clean.includes('ufc')) return 'mma';
   return null;
 }
