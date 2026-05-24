@@ -86,7 +86,13 @@ export async function recordTurnoverCredit({ userId, amount, source = '', source
   if (!type || creditAmount <= 0) return null;
   if (!boolEnv(env.WITHDRAW_TURNOVER_REQUIRED, true)) return null;
 
-  const requiredWager = money(creditAmount * getTurnoverMultiplierForType(type));
+  const metaRequiredWager = Number(meta?.requiredTurnover);
+  const metaMultiplier = Number(meta?.turnoverMultiplier);
+  const requiredWager = money(
+    Number.isFinite(metaRequiredWager) && metaRequiredWager >= 0
+      ? metaRequiredWager
+      : creditAmount * (Number.isFinite(metaMultiplier) && metaMultiplier >= 0 ? metaMultiplier : getTurnoverMultiplierForType(type))
+  );
   if (requiredWager <= 0) return null;
 
   return TurnoverRequirement.create({
