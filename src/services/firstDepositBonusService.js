@@ -178,18 +178,84 @@ function isEmailVerified(user = {}) {
     || ['google', 'facebook'].includes(String(user.registrationType || '').toLowerCase());
 }
 
-export async function getFirstDepositBonusEligibility(user = {}) {
-  // Verification documents are no longer required for deposit/bonus eligibility.
-  // This compatibility function always allows the legacy first-deposit bonus when
-  // that bonus is explicitly enabled by env. The active default bonus is now the
-  // signup bonus in signupBonusService.js.
+
+function requiredProfileFields() {
+  const raw = String(env.FIRST_DEPOSIT_BONUS_REQUIRED_FIELDS || 'fullName,email,address')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return raw.length ? raw : ['fullName', 'email', 'phone', 'address'];
+}
+
+function fieldComplete(user = {}, field = '') {
+  const key = String(field || '').trim();
+  if (!key) return true;
+  if (key === 'emailVerified') return isEmailVerified(user);
+  if (key === 'name') return hasText(user.fullName || user.name);
+  return hasText(user[key]);
+}
+
+async function findVerificationProfileDate(userId) {
+  const verification = await Verification.findOne({ user: userId }).select('updatedAt createdAt fullName email phone address').lean();
+  return verification?.updatedAt || verification?.createdAt || null;
+}
+
+export async function getFirstDepositBonusEligibility(user = {}, options = {}) {
+  const requiredFields = requiredProfileFields();
+  const missing = requiredFields.filter((field) => !fieldComplete(user, field));
+  const eligible = missing.length === 0;
+
+  let profileCompletedAt = user.firstDepositBonusProfileCompletedAt || null;
+
+  if (eligible && !profileCompletedAt && user._id && options.markComplete !== false) {
+    const verificationDate = await findVerificationProfileDate(user._id);
+    profileCompletedAt = verificationDate || new Date();
+
+    await User.updateOne(
+      { _id: user._id, $or: [{ firstDepositBonusProfileCompletedAt: { $exists: false } }, { firstDepositBonusProfileCompletedAt: null }] },
+      { $set: { firstDepositBonusProfileCompletedAt: profileCompletedAt } }
+    ).catch(() => null);
+  }
+
   return {
-    eligible: true,
-    missing: [],
-    verificationStatus: user.verificationStatus || 'not_required',
-    verificationRequired: false,
+    eligible,
+    missing,
+    requiredFields,
+    profileCompletedAt,
+    verificationStatus: user.verificationStatus || (eligible ? 'profile_complete' : 'profile_required'),
+    verificationRequired: true,
     documentUploadRequired: false,
+    rule: 'first-successful-deposit-after-profile-complete',
   };
+}
+
+export async function markFirstDepositBonusProfileCompleteIfReady(userOrId) {
+  const user = userOrId?._id ? userOrId : await User.findById(userOrId);
+  if (!user) return { marked: false, reason: 'user_not_found' };
+
+  const eligibility = await getFirstDepositBonusEligibility(user, { markComplete: false });
+  if (!eligibility.eligible) return { marked: false, reason: 'profile_incomplete', eligibility };
+  if (user.firstDepositBonusProfileCompletedAt) {
+    return { marked: false, reason: 'already_marked', profileCompletedAt: user.firstDepositBonusProfileCompletedAt, eligibility };
+  }
+
+  const profileCompletedAt = new Date();
+  user.firstDepositBonusProfileCompletedAt = profileCompletedAt;
+  user.verificationStatus = user.verificationStatus === 'not_submitted' ? 'profile_complete' : user.verificationStatus;
+  await user.save();
+
+  return { marked: true, profileCompletedAt, eligibility };
+}
+
+async function findFirstEligibleDepositAfterProfile({ userId, profileCompletedAt }) {
+  if (!userId || !profileCompletedAt) return null;
+
+  return Transaction.findOne({
+    user: userId,
+    type: 'DEPOSIT',
+    status: 'SUCCESS',
+    createdAt: { $gte: profileCompletedAt },
+  }).sort({ createdAt: 1, _id: 1 }).select('_id amount createdAt processedAt status');
 }
 
 
@@ -217,15 +283,6 @@ export async function awardFirstDepositBonusForTransaction(depositTransaction) {
     return { awarded: false, reason: 'already_awarded_or_rejected', bonusTransaction: alreadyAwardedTransaction };
   }
 
-  const successfulDepositCount = await Transaction.countDocuments({
-    user: transaction.user,
-    type: 'DEPOSIT',
-    status: 'SUCCESS',
-  });
-  if (successfulDepositCount !== 1) {
-    return { awarded: false, reason: 'not_first_successful_deposit', successfulDepositCount };
-  }
-
   const user = await User.findById(transaction.user);
   if (!user) return { awarded: false, reason: 'user_not_found' };
 
@@ -233,10 +290,33 @@ export async function awardFirstDepositBonusForTransaction(depositTransaction) {
   if (!eligibility.eligible) {
     return { awarded: false, reason: 'profile_not_eligible', eligibility };
   }
+  if (!eligibility.profileCompletedAt) {
+    return { awarded: false, reason: 'profile_completion_time_missing', eligibility };
+  }
+
+  const firstEligibleDeposit = await findFirstEligibleDepositAfterProfile({
+    userId: user._id,
+    profileCompletedAt: eligibility.profileCompletedAt,
+  });
+
+  if (!firstEligibleDeposit) {
+    return { awarded: false, reason: 'no_deposit_after_profile_complete', eligibility };
+  }
+
+  if (String(firstEligibleDeposit._id) !== String(transaction._id)) {
+    return {
+      awarded: false,
+      reason: 'not_first_deposit_after_profile_complete',
+      firstEligibleDeposit: firstEligibleDeposit._id,
+      firstEligibleDepositCreatedAt: firstEligibleDeposit.createdAt,
+      profileCompletedAt: eligibility.profileCompletedAt,
+    };
+  }
 
   const cap = await getFirstDepositBonusCap(user);
   const depositAmount = money(transaction.amount);
-  const bonusAmount = money(Math.min(depositAmount, cap.capAmount));
+  const capEnabled = boolEnv(env.FIRST_DEPOSIT_BONUS_CAP_ENABLED, false);
+  const bonusAmount = capEnabled ? money(Math.min(depositAmount, cap.capAmount)) : depositAmount;
   if (bonusAmount <= 0) return { awarded: false, reason: 'empty_bonus_amount' };
 
   const claimedUser = await User.findOneAndUpdate(
@@ -282,7 +362,10 @@ export async function awardFirstDepositBonusForTransaction(depositTransaction) {
         baseCapAmount: cap.baseCapAmount,
         rate: cap.rate,
         rateSource: cap.rateSource,
-        turnoverMultiplier: Number(env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER || env.BONUS_TURNOVER_MULTIPLIER || 1),
+        turnoverMultiplier: Number(env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER ?? env.BONUS_TURNOVER_MULTIPLIER ?? 2),
+        requiredTurnover: money(bonusAmount * Number(env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER ?? env.BONUS_TURNOVER_MULTIPLIER ?? 2)),
+        profileCompletedAt: eligibility.profileCompletedAt,
+        firstDepositAfterProfileComplete: true,
       },
     });
 
@@ -436,16 +519,36 @@ export async function rejectFirstDepositBonusForUser(userId) {
 }
 
 export async function getFirstDepositBonusSummary(userId) {
-  const [bonusTransaction, openRequirements] = await Promise.all([
-    Transaction.findOne({ user: userId, type: 'BONUS', 'gatewayPayload.bonusCode': BONUS_CODE })
-      .sort({ createdAt: -1 }),
-    TurnoverRequirement.find({
+  const bonusTransaction = await Transaction.findOne({
+    user: userId,
+    type: 'BONUS',
+    'gatewayPayload.bonusCode': BONUS_CODE,
+  }).sort({ createdAt: -1 });
+
+  const requirementFilter = bonusTransaction?._id
+    ? {
       user: userId,
       type: 'bonus',
       status: 'open',
       remaining: { $gt: 0 },
-    }).sort({ createdAt: 1 }),
-  ]);
+      $or: [
+        { sourceRef: bonusTransaction._id },
+        { 'meta.bonusCode': BONUS_CODE },
+        { source: BONUS_SOURCE },
+      ],
+    }
+    : {
+      user: userId,
+      type: 'bonus',
+      status: 'open',
+      remaining: { $gt: 0 },
+      $or: [
+        { 'meta.bonusCode': BONUS_CODE },
+        { source: BONUS_SOURCE },
+      ],
+    };
+
+  const openRequirements = await TurnoverRequirement.find(requirementFilter).sort({ createdAt: 1 });
 
   const remainingTurnover = money(openRequirements.reduce((sum, item) => sum + Number(item.remaining || 0), 0));
   const totalRequiredTurnover = money(openRequirements.reduce((sum, item) => sum + Number(item.requiredWager || 0), 0));
@@ -457,13 +560,16 @@ export async function getFirstDepositBonusSummary(userId) {
 
   return {
     bonusCode: BONUS_CODE,
+    title: 'First deposit bonus',
     awarded,
     rejected,
     canReject: awarded && originalAmount > 0,
     amount: awarded ? originalAmount : 0,
     originalAmount,
     status,
+    currency: bonusTransaction?.currency || '',
     transactionId: bonusTransaction?._id || null,
+    turnoverMultiplier: bonusTransaction?.gatewayPayload?.turnoverMultiplier || Number(env.WITHDRAW_BONUS_TURNOVER_MULTIPLIER ?? env.BONUS_TURNOVER_MULTIPLIER ?? 2),
     remainingTurnover: awarded ? remainingTurnover : 0,
     totalRequiredTurnover: awarded ? totalRequiredTurnover : 0,
     totalWagered: awarded ? totalWagered : 0,

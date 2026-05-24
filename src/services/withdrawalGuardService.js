@@ -24,11 +24,11 @@ function getTurnoverMultiplierForType(type = '') {
   const normalizedType = String(type || '').toLowerCase();
 
   // Active rule:
-  // - Signup/new-account bonus: 100 BDT equivalent must be wagered 2x before withdrawal.
-  // - Other bonus credits follow the same bonus multiplier by default.
-  // - Deposit turnover remains configurable and defaults to 50% of deposit amount.
+  // - Real deposit balance must be wagered 1x before withdrawal.
+  // - First-deposit bonus / reward bonus balance must be wagered 2x before withdrawal.
+  // - Multipliers remain configurable by env if the business changes the rule later.
   if (normalizedType === 'deposit') {
-    return positiveNumber(env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER ?? env.DEPOSIT_TURNOVER_MULTIPLIER, 0.5);
+    return positiveNumber(env.WITHDRAW_DEPOSIT_TURNOVER_MULTIPLIER ?? env.DEPOSIT_TURNOVER_MULTIPLIER, 1);
   }
 
   if (normalizedType === 'bonus') {
@@ -86,13 +86,7 @@ export async function recordTurnoverCredit({ userId, amount, source = '', source
   if (!type || creditAmount <= 0) return null;
   if (!boolEnv(env.WITHDRAW_TURNOVER_REQUIRED, true)) return null;
 
-  const metaRequiredWager = Number(meta?.requiredTurnover);
-  const metaMultiplier = Number(meta?.turnoverMultiplier);
-  const requiredWager = money(
-    Number.isFinite(metaRequiredWager) && metaRequiredWager >= 0
-      ? metaRequiredWager
-      : creditAmount * (Number.isFinite(metaMultiplier) && metaMultiplier >= 0 ? metaMultiplier : getTurnoverMultiplierForType(type))
-  );
+  const requiredWager = money(creditAmount * getTurnoverMultiplierForType(type));
   if (requiredWager <= 0) return null;
 
   return TurnoverRequirement.create({
