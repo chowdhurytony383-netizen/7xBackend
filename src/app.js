@@ -40,6 +40,8 @@ import supportRoutes from './routes/supportRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import adminSupportRoutes from './routes/adminSupportRoutes.js';
 import adminNotificationRoutes from './routes/adminNotificationRoutes.js';
+import vipRoutes from './routes/vipRoutes.js';
+import adminVipRoutes from './routes/adminVipRoutes.js';
 
 // 7X Crush provider launch route
 import crushProviderLaunchRoutes from './routes/crushProviderLaunchRoutes.js';
@@ -129,6 +131,7 @@ app.use('/api/affiliate', affiliateRoutes);
 app.use('/api/referral', referralRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/vip', vipRoutes);
 app.use('/api/bet', betRoutes);
 
 // 7X Crush provider launch API
@@ -154,6 +157,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/admin', adminAffiliateRoutes);
 app.use('/api/admin', adminSupportRoutes);
 app.use('/api/admin', adminNotificationRoutes);
+app.use('/api/admin', adminVipRoutes);
 app.use('/api/admin', adminCryptoRoutes);
 app.use('/api/admin', adminAgentPaymentRoutes);
 app.use('/api/admin', adminAgentRequestRoutes);
