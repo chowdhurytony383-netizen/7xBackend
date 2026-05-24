@@ -175,6 +175,8 @@ const CATEGORY_META = {
   tennis: { key: 'tennis', slug: 'tennis', name: 'Tennis', displayName: 'Tennis', icon: '🎾', colorClass: 'sport-tennis', gradient: 'linear-gradient(135deg,#a3e635,#65a30d)' },
   hockey: { key: 'hockey', slug: 'hockey', name: 'Hockey', displayName: 'Hockey', icon: '🏒', colorClass: 'sport-hockey', gradient: 'linear-gradient(135deg,#38bdf8,#2563eb)' },
   baseball: { key: 'baseball', slug: 'baseball', name: 'Baseball', displayName: 'Baseball', icon: '⚾', colorClass: 'sport-baseball', gradient: 'linear-gradient(135deg,#f43f5e,#be123c)' },
+  americanfootball: { key: 'americanfootball', slug: 'americanfootball', name: 'American Football', displayName: 'American Football', icon: '🏈', colorClass: 'sport-americanfootball', gradient: 'linear-gradient(135deg,#f97316,#92400e)' },
+  afl: { key: 'afl', slug: 'afl', name: 'AFL', displayName: 'AFL', icon: '🏉', colorClass: 'sport-afl', gradient: 'linear-gradient(135deg,#ec4899,#7c3aed)' },
   rugby: { key: 'rugby', slug: 'rugby', name: 'Rugby', displayName: 'Rugby', icon: '🏉', colorClass: 'sport-rugby', gradient: 'linear-gradient(135deg,#14b8a6,#0f766e)' },
   volleyball: { key: 'volleyball', slug: 'volleyball', name: 'Volleyball', displayName: 'Volleyball', icon: '🏐', colorClass: 'sport-volleyball', gradient: 'linear-gradient(135deg,#c084fc,#7c3aed)' },
   boxing: { key: 'boxing', slug: 'boxing', name: 'Boxing / MMA', displayName: 'Boxing / MMA', icon: '🥊', colorClass: 'sport-boxing', gradient: 'linear-gradient(135deg,#f97316,#dc2626)' },
@@ -219,16 +221,38 @@ function visibleEventFilter(extra = {}) {
 
 function categoryKeyForSport(sportKey = '', sportTitle = '') {
   const clean = `${sportKey} ${sportTitle}`.toLowerCase();
-  if (clean.includes('soccer') || clean.includes('football') || clean.includes('uefa') || clean.includes('epl')) return 'football';
+  if (clean.includes('americanfootball') || clean.includes('american football') || clean.includes('nfl') || clean.includes('ncaaf') || clean.includes('cfl')) return 'americanfootball';
+  if (clean.includes('aussierules') || clean.includes('aussie') || clean.includes('afl')) return 'afl';
+  if (clean.includes('soccer') || clean.includes('football') || clean.includes('uefa') || clean.includes('epl') || clean.includes('fifa') || clean.includes('la_liga') || clean.includes('bundesliga') || clean.includes('serie_a')) return 'football';
   if (clean.includes('cricket')) return 'cricket';
   if (clean.includes('basket')) return 'basketball';
   if (clean.includes('tennis')) return 'tennis';
-  if (clean.includes('hockey')) return 'hockey';
-  if (clean.includes('baseball')) return 'baseball';
+  if (clean.includes('icehockey') || clean.includes('hockey')) return 'hockey';
+  if (clean.includes('baseball') || clean.includes('mlb')) return 'baseball';
   if (clean.includes('rugby')) return 'rugby';
   if (clean.includes('volleyball')) return 'volleyball';
-  if (clean.includes('mma') || clean.includes('boxing')) return 'boxing';
+  if (clean.includes('mma') || clean.includes('boxing') || clean.includes('ufc')) return 'boxing';
   return 'sports';
+}
+
+function sportQueryAliases(query = '') {
+  const clean = String(query || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const aliases = {
+    football: ['soccer', 'football', 'epl', 'uefa', 'fifa', 'laliga', 'bundesliga', 'seriea', 'ligue', 'mls'],
+    soccer: ['soccer', 'football', 'epl', 'uefa', 'fifa', 'laliga', 'bundesliga', 'seriea', 'ligue', 'mls'],
+    americanfootball: ['americanfootball', 'nfl', 'ncaaf', 'cfl'],
+    cricket: ['cricket'],
+    basketball: ['basketball', 'nba', 'ncaab', 'wnba'],
+    tennis: ['tennis', 'atp', 'wta'],
+    hockey: ['icehockey', 'hockey', 'nhl'],
+    baseball: ['baseball', 'mlb', 'npb', 'kbo'],
+    rugby: ['rugby', 'rugbyleague', 'rugbyunion'],
+    volleyball: ['volleyball'],
+    boxing: ['boxing', 'mma', 'ufc'],
+    mma: ['boxing', 'mma', 'ufc'],
+    afl: ['afl', 'aussierules', 'aussie'],
+  };
+  return aliases[clean] || (clean ? [clean] : []);
 }
 
 function categoryForEvent(event = {}) {
@@ -479,6 +503,12 @@ export const categories = asyncHandler(async (_req, res) => {
     CATEGORY_META.cricket,
     CATEGORY_META.basketball,
     CATEGORY_META.tennis,
+    CATEGORY_META.baseball,
+    CATEGORY_META.hockey,
+    CATEGORY_META.americanfootball,
+    CATEGORY_META.rugby,
+    CATEGORY_META.volleyball,
+    CATEGORY_META.boxing,
   ];
 
   const payload = { success: true, data: fallback, categories: fallback, sports: fallback, cached: false };
@@ -496,7 +526,9 @@ export const liveMatches = asyncHandler(async (req, res) => {
 
   const extraFilter = {};
   if (sportQuery) {
-    const regex = new RegExp(sportQuery.replace(/[^a-z0-9]/gi, ''), 'i');
+    const aliases = sportQueryAliases(sportQuery);
+    const pattern = aliases.map((alias) => alias.replace(/[^a-z0-9]/gi, '')).filter(Boolean).join('|') || sportQuery.replace(/[^a-z0-9]/gi, '');
+    const regex = new RegExp(pattern, 'i');
     extraFilter.$or = [
       { sportKey: regex },
       { sportTitle: regex },
