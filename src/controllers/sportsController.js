@@ -26,12 +26,22 @@ function cacheTtlMs(name, fallbackSeconds) {
   return Math.max(1, Number.isFinite(value) ? value : fallbackSeconds) * 1000;
 }
 
+function normalizeProviderName(value = '') {
+  const provider = String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  if (!provider) return 'theoddsapi';
+  if (['lowcost', 'low-cost', 'cheap', 'hybrid', 'multi', 'all', 'the-odds-api', 'the_odds_api', 'oddsapi', 'theodds'].includes(provider)) return 'theoddsapi';
+  if (['api-sports', 'api_sports', 'apisports'].includes(provider)) return 'apisports';
+  if (['sportmonkscricket', 'sportmonks-cricket', 'sportmonks_cricket'].includes(provider)) return 'sportmonks-cricket';
+  if (['sportmonksfootball', 'sportmonks-football', 'sportmonks_football'].includes(provider)) return 'sportmonks-football';
+  return provider;
+}
+
 function sportsProviderName() {
-  return String(
+  return normalizeProviderName(
     process.env.SPORTS_PROVIDER
     || process.env.SPORTS_ODDS_PROVIDER
     || 'theoddsapi'
-  ).toLowerCase();
+  );
 }
 
 function sportsApiKeyConfigured() {
