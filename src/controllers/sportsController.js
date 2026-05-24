@@ -280,17 +280,51 @@ function colorIndexFor(value = '') {
   return (hash % 8) + 1;
 }
 
-function teamObject(name, sportKey = '') {
+function logoFromSource(source = {}) {
+  if (!source || typeof source !== 'object') return '';
+  return source.logo
+    || source.logoUrl
+    || source.image
+    || source.imageUrl
+    || source.image_path
+    || source.flag
+    || source.flagUrl
+    || source.badge
+    || source.raw?.logo
+    || source.raw?.logoUrl
+    || source.raw?.image
+    || source.raw?.imageUrl
+    || source.raw?.image_path
+    || '';
+}
+
+function teamObject(name, sportKey = '', source = {}) {
+  const resolvedName = source?.name || source?.displayName || source?.shortName || name;
+  const logo = logoFromSource(source);
   return {
-    name,
-    displayName: name,
-    shortName: shortTeamCode(name),
-    logo: '',
-    image: '',
-    flag: '',
-    logoText: shortTeamCode(name),
-    colorClass: `team-logo-${colorIndexFor(`${sportKey}:${name}`)}`,
+    name: resolvedName,
+    displayName: resolvedName,
+    shortName: source?.shortName || shortTeamCode(resolvedName),
+    logo,
+    logoUrl: logo,
+    image: logo,
+    imageUrl: logo,
+    flag: source?.flag || source?.flagUrl || '',
+    logoText: source?.logoText || shortTeamCode(resolvedName),
+    colorClass: source?.colorClass || `team-logo-${colorIndexFor(`${sportKey}:${resolvedName}`)}`,
+    raw: source?.raw || null,
   };
+}
+
+function teamObjectForEvent(event = {}, side = 'home') {
+  const name = side === 'home' ? event.homeTeam : event.awayTeam;
+  const sportmonksTeams = event.raw?.sportmonksTeams || {};
+  const fallbackTeams = event.raw?.teams || event.raw?.participants || {};
+  const source = sportmonksTeams[side]
+    || fallbackTeams[side]
+    || event.raw?.[side === 'home' ? 'homeTeam' : 'awayTeam']
+    || {};
+  return teamObject(name, event.sportKey, source);
 }
 
 function scoreEntryForTeam(event, teamName) {
@@ -413,8 +447,8 @@ function formatAutoEventFromMarket(event, market = null) {
     country: '',
     league: event.league || event.sportTitle || '',
     tournament: event.league || event.sportTitle || '',
-    homeTeam: teamObject(event.homeTeam, event.sportKey),
-    awayTeam: teamObject(event.awayTeam, event.sportKey),
+    homeTeam: teamObjectForEvent(event, 'home'),
+    awayTeam: teamObjectForEvent(event, 'away'),
     score: { home: homeScore, away: awayScore },
     scores: event.scores || [],
     status,
