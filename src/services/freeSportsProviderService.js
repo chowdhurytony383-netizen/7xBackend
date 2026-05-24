@@ -5,7 +5,7 @@ import SportsAutoEvent from '../models/SportsAutoEvent.js';
 import SportsAutoMarket from '../models/SportsAutoMarket.js';
 import SportsSyncLog from '../models/SportsSyncLog.js';
 import { clearApiSportsStaleEvents, syncApiSportsOdds, syncApiSportsScores } from './apiSportsOddsProviderService.js';
-import { clearSportmonksCricketStaleEvents, sportmonksCricketConfigured, syncSportmonksCricketOdds, syncSportmonksCricketScores } from './sportmonksCricketService.js';
+import { clearSportmonksCricketStaleEvents, getSportmonksCricketMatchDetails, sportmonksCricketConfigured, syncSportmonksCricketOdds, syncSportmonksCricketScores } from './sportmonksCricketService.js';
 import { clearSportmonksFootballStaleEvents, sportmonksFootballConfigured, syncSportmonksFootballOdds, syncSportmonksFootballScores } from './sportmonksFootballService.js';
 
 const THE_ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
@@ -265,6 +265,61 @@ function nowStatus(commenceTime) {
   return 'LIVE';
 }
 
+function isCricketSportKey(sportKey = '', sportTitle = '') {
+  return `${sportKey || ''} ${sportTitle || ''}`.toLowerCase().includes('cricket');
+}
+
+async function enrichTheOddsApiCricketEventScore(event, providerEvent = {}, sportKey = '') {
+  if (!sportmonksCricketConfigured() || !isCricketSportKey(providerEvent.sport_key || sportKey, providerEvent.sport_title || '')) return event;
+
+  try {
+    const plainEvent = event?.toObject ? event.toObject() : event;
+    const details = await getSportmonksCricketMatchDetails({
+      ...plainEvent,
+      provider: 'theoddsapi',
+      homeTeam: providerEvent.home_team || plainEvent.homeTeam,
+      awayTeam: providerEvent.away_team || plainEvent.awayTeam,
+      commenceTime: providerEvent.commence_time || plainEvent.commenceTime,
+      sportKey: providerEvent.sport_key || sportKey,
+      sportTitle: providerEvent.sport_title || plainEvent.sportTitle,
+      league: providerEvent.sport_title || plainEvent.league,
+      raw: { ...(plainEvent.raw || {}), ...providerEvent },
+    });
+
+    if (!details?.available || !Array.isArray(details.scoreSummary) || !details.scoreSummary.length) return event;
+
+    const updated = await SportsAutoEvent.findByIdAndUpdate(
+      event._id,
+      {
+        $set: {
+          scores: details.scoreSummary.map((score) => ({
+            name: score.name || '',
+            score: Number(score.score || 0),
+            wickets: score.wickets ?? null,
+            overs: score.overs || '',
+            inning: score.inning ?? null,
+            label: score.label || score.name || '',
+            display: score.display || '',
+          })),
+          lastScoreUpdate: new Date(),
+          raw: {
+            ...(plainEvent.raw || {}),
+            sportmonksFixtureId: details.fixtureId || null,
+            sportmonksStatus: details.status || null,
+            sportmonksScoreSnapshot: details.scoreSummary,
+          },
+        },
+      },
+      { new: true }
+    );
+
+    return updated || event;
+  } catch (error) {
+    console.warn('[sports] SportMonks cricket score enrichment failed:', error?.message || error);
+    return event;
+  }
+}
+
 function oldEventCutoff() {
   const hours = Math.max(1, Number(env.SPORTS_HIDE_STARTED_OLDER_HOURS || 24));
   return new Date(Date.now() - hours * 60 * 60 * 1000);
@@ -435,7 +490,7 @@ async function upsertOddsEvent(providerEvent, sportKey) {
   const sportTitle = providerEvent.sport_title || providerEvent.sportTitle || sportKey;
   const league = providerEvent.sport_title || providerEvent.league || '';
 
-  const event = await SportsAutoEvent.findOneAndUpdate(
+  let event = await SportsAutoEvent.findOneAndUpdate(
     { provider: 'theoddsapi', providerEventId },
     {
       $set: {
@@ -456,6 +511,8 @@ async function upsertOddsEvent(providerEvent, sportKey) {
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+
+  event = await enrichTheOddsApiCricketEventScore(event, providerEvent, sportKey);
 
   const bookmaker = pickBookmaker(providerEvent.bookmakers || []);
   if (!bookmaker) return { event, marketCount: 0 };

@@ -301,20 +301,64 @@ function extractNumericScore(run = {}) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function aggregateCricketScores(fixture = {}) {
+function formatOvers(value) {
+  if (value === undefined || value === null || value === '') return '';
+  return String(value);
+}
+
+function formatCricketScore(score = 0, wickets = null, overs = '') {
+  const numericScore = Number(score || 0);
+  const scorePart = Number.isFinite(numericScore) ? String(numericScore) : String(score || 0);
+  const wicketsPart = wickets !== undefined && wickets !== null && wickets !== '' ? `/${wickets}` : '';
+  const oversPart = overs !== undefined && overs !== null && overs !== '' ? ` (${overs} ov)` : '';
+  return `${scorePart}${wicketsPart}${oversPart}`;
+}
+
+function runTeamName(run = {}, fixture = {}) {
   const map = teamMapForFixture(fixture);
+  const teamId = run.team_id || run.team?.id || run.teamId;
+  return map.get(String(teamId)) || teamName(run.team?.data || run.team, '');
+}
+
+function normalizeCricketRuns(fixture = {}) {
+  return runsForFixture(fixture).map((run, index) => {
+    const name = runTeamName(run, fixture) || `Innings ${index + 1}`;
+    const score = extractNumericScore(run);
+    const wickets = run.wickets ?? run.wicket ?? run.wickets_lost ?? null;
+    const overs = formatOvers(run.overs ?? run.over ?? '');
+    const inning = Number(run.inning ?? run.innings ?? index + 1) || index + 1;
+    const display = formatCricketScore(score, wickets, overs);
+    return {
+      id: run.id || `${name}-${inning}-${index}`,
+      name,
+      team: name,
+      teamId: run.team_id || run.team?.id || null,
+      inning,
+      label: `${name} · Innings ${inning}`,
+      score,
+      wickets,
+      overs,
+      display,
+      value: display,
+      raw: run,
+    };
+  });
+}
+
+function aggregateCricketScores(fixture = {}) {
+  const normalizedRuns = normalizeCricketRuns(fixture);
   const totals = new Map();
   const latestMeta = new Map();
 
-  for (const run of runsForFixture(fixture)) {
-    const teamId = run.team_id || run.team?.id || run.teamId;
-    const name = map.get(String(teamId)) || teamName(run.team?.data || run.team, '');
+  for (const run of normalizedRuns) {
+    const name = run.name;
     if (!name) continue;
-    totals.set(name, (totals.get(name) || 0) + extractNumericScore(run));
+    totals.set(name, (totals.get(name) || 0) + Number(run.score || 0));
     latestMeta.set(name, {
-      wickets: run.wickets ?? run.wicket ?? run.wickets_lost ?? null,
-      overs: run.overs ?? run.over ?? null,
-      inning: run.inning ?? run.innings ?? null,
+      wickets: run.wickets,
+      overs: run.overs,
+      inning: run.inning,
+      label: run.label,
     });
   }
 
@@ -323,11 +367,118 @@ function aggregateCricketScores(fixture = {}) {
   if (!totals.has(local)) totals.set(local, 0);
   if (!totals.has(visitor)) totals.set(visitor, 0);
 
-  return [...totals.entries()].map(([name, score]) => ({
-    name,
-    score,
-    meta: latestMeta.get(name) || {},
-  }));
+  return [...totals.entries()].map(([name, score]) => {
+    const meta = latestMeta.get(name) || {};
+    const display = formatCricketScore(score, meta.wickets, meta.overs);
+    return {
+      name,
+      score,
+      wickets: meta.wickets ?? null,
+      overs: meta.overs || '',
+      inning: meta.inning ?? null,
+      label: meta.label || name,
+      display,
+    };
+  });
+}
+
+function playerName(value = {}, fallback = '') {
+  const source = value?.data || value || {};
+  if (typeof source === 'string') return source;
+  return source.fullname || source.display_name || source.name || [source.firstname, source.lastname].filter(Boolean).join(' ') || fallback || '';
+}
+
+function scoreDescription(score = {}) {
+  if (!score || typeof score !== 'object') return '';
+  const parts = [];
+  if (score.runs !== undefined) parts.push(`${score.runs} run${Number(score.runs) === 1 ? '' : 's'}`);
+  if (score.four) parts.push('4');
+  if (score.six) parts.push('6');
+  if (score.wicket) parts.push('Wicket');
+  if (score.noball_runs) parts.push(`NB ${score.noball_runs}`);
+  if (score.wide) parts.push('Wide');
+  if (score.bye) parts.push('Bye');
+  if (score.leg_bye) parts.push('Leg bye');
+  return parts.join(' · ') || score.name || score.description || '';
+}
+
+function normalizeCricketBalls(fixture = {}) {
+  return getArray(fixture.balls).slice(-80).reverse().map((ball, index) => {
+    const batsman = playerName(ball.batsman, ball.batsman_name || '');
+    const bowler = playerName(ball.bowler, ball.bowler_name || '');
+    const overLabel = ball.ball || ball.over || ball.scoreboard || index + 1;
+    const description = scoreDescription(ball.score?.data || ball.score || {});
+    return {
+      id: ball.id || `${overLabel}-${index}`,
+      minute: overLabel,
+      name: description || 'Ball update',
+      description: [batsman && `Bat: ${batsman}`, bowler && `Bowl: ${bowler}`].filter(Boolean).join(' · '),
+      player_name: batsman || bowler || '',
+      result: description,
+      raw: ball,
+    };
+  });
+}
+
+function normalizeCricketScoreboards(fixture = {}) {
+  return getArray(fixture.scoreboards).map((row, index) => {
+    const type = row.type || row.scoreboard || row.category || 'Scoreboard';
+    const batsman = playerName(row.batsman, row.batsman_name || '');
+    const bowler = playerName(row.bowler, row.bowler_name || '');
+    const player = batsman || bowler || playerName(row.player, row.player_name || 'Player');
+    const score = row.score?.data || row.score || {};
+    const valueParts = [];
+    if (row.total !== undefined && Number(row.total) !== 0) valueParts.push(`Total ${row.total}`);
+    if (row.runs !== undefined) valueParts.push(`${row.runs} runs`);
+    if (row.overs !== undefined && Number(row.overs) !== 0) valueParts.push(`${row.overs} overs`);
+    if (row.wickets !== undefined && Number(row.wickets) !== 0) valueParts.push(`${row.wickets} wkts`);
+    if (score.name) valueParts.push(score.name);
+    return {
+      id: row.id || `${type}-${player}-${index}`,
+      name: player,
+      type,
+      description: type,
+      value: valueParts.join(' · ') || scoreDescription(score) || type,
+      total: row.total,
+      score: row.total ?? row.runs ?? score.runs ?? undefined,
+      player: { name: player },
+      raw: row,
+    };
+  });
+}
+
+function normalizeCricketLineups(fixture = {}) {
+  const lineup = getArray(fixture.lineup);
+  if (lineup.length) {
+    return lineup.map((item, index) => ({
+      id: item.id || item.player_id || index,
+      name: playerName(item.player, item.name || item.fullname || ''),
+      player_name: playerName(item.player, item.name || item.fullname || ''),
+      type: item.lineup || item.type || item.position?.name || '',
+      number: item.number || item.jersey_number || index + 1,
+      raw: item,
+    }));
+  }
+  const seen = new Map();
+  normalizeCricketScoreboards(fixture).forEach((row) => {
+    if (row.name && !seen.has(row.name)) seen.set(row.name, { ...row, player_name: row.name });
+  });
+  return [...seen.values()].slice(0, 40);
+}
+
+function normalizeCricketStatistics(fixture = {}) {
+  const stats = [];
+  normalizeCricketRuns(fixture).forEach((run) => {
+    stats.push({
+      id: `score-${run.id}`,
+      name: run.label,
+      type: 'Score',
+      value: run.display,
+    });
+    if (run.overs) stats.push({ id: `overs-${run.id}`, name: `${run.name} overs`, type: 'Overs', value: run.overs });
+    if (run.wickets !== null && run.wickets !== undefined) stats.push({ id: `wickets-${run.id}`, name: `${run.name} wickets`, type: 'Wickets', value: run.wickets });
+  });
+  return stats;
 }
 
 function leagueName(fixture = {}) {
@@ -754,13 +905,21 @@ export async function getSportmonksCricketMatchDetails(event = {}) {
         logo: teamLogo(visitor),
         raw: visitor || null,
       },
-      scores: aggregateCricketScores(fixture),
-      scoreboards: getArray(fixture?.scoreboards),
-      runs: getArray(fixture?.runs),
-      balls: getArray(fixture?.balls),
+      scores: normalizeCricketRuns(fixture),
+      scoreSummary: aggregateCricketScores(fixture),
+      scoreboards: normalizeCricketScoreboards(fixture),
+      rawScoreboards: getArray(fixture?.scoreboards),
+      runs: normalizeCricketRuns(fixture),
+      rawRuns: getArray(fixture?.runs),
+      balls: normalizeCricketBalls(fixture),
+      rawBalls: getArray(fixture?.balls),
       batting: getArray(fixture?.batting),
       bowling: getArray(fixture?.bowling),
-      lineup: getArray(fixture?.lineup),
+      events: normalizeCricketBalls(fixture),
+      statistics: normalizeCricketStatistics(fixture),
+      players: normalizeCricketScoreboards(fixture),
+      lineups: normalizeCricketLineups(fixture),
+      lineup: normalizeCricketLineups(fixture),
       toss: fixture?.tosswon || fixture?.tosswon?.data || fixture?.toss || null,
       manOfMatch: fixture?.manofmatch || fixture?.manofmatch?.data || null,
       manOfSeries: fixture?.manofseries || fixture?.manofseries?.data || null,
