@@ -307,6 +307,10 @@ async function enrichTheOddsApiCricketEventScore(event, providerEvent = {}, spor
             sportmonksFixtureId: details.fixtureId || null,
             sportmonksStatus: details.status || null,
             sportmonksScoreSnapshot: details.scoreSummary,
+            sportmonksTeams: {
+              home: details.homeTeam || null,
+              away: details.awayTeam || null,
+            },
           },
         },
       },
