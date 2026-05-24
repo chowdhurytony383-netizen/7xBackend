@@ -8,11 +8,13 @@ import { creditWallet, debitWallet } from '../utils/wallet.js';
 const BONUS_CODE = 'FIRST_DEPOSIT_100';
 const BONUS_SOURCE = 'first-deposit-bonus';
 const BASE_CURRENCY = 'BDT';
-const DEFAULT_BASE_CAP_BDT = 15000;
+const DEFAULT_BASE_MIN_DEPOSIT_BDT = 100;
+const DEFAULT_BASE_CAP_BDT = 14000;
 
 const rateCache = new Map();
 let envRateCache = null;
 let envCapCache = null;
+let envMinDepositCache = null;
 
 const fallbackBdtRates = {
   BDT: 1,
@@ -93,6 +95,13 @@ function envCaps() {
   return envCapCache;
 }
 
+function envMinDeposits() {
+  if (!envMinDepositCache) {
+    envMinDepositCache = parseJsonMap(env.FIRST_DEPOSIT_BONUS_MIN_DEPOSITS_JSON, {});
+  }
+  return envMinDepositCache;
+}
+
 async function fetchLiveBdtRates() {
   const apiUrl = String(env.FIRST_DEPOSIT_BONUS_EXCHANGE_API_URL || '').trim();
   if (!apiUrl || !boolEnv(env.FIRST_DEPOSIT_BONUS_USE_LIVE_RATES, true)) return null;
@@ -138,6 +147,34 @@ async function getBdtToCurrencyRate(currency) {
   if (liveRates?.[targetCurrency]) return liveRates[targetCurrency];
 
   return fallbackBdtRates[targetCurrency] || 1;
+}
+
+export async function getFirstDepositBonusMinDeposit(user = {}) {
+  const currency = cleanCurrency(user.currency || BASE_CURRENCY);
+  const directMin = envMinDeposits()[currency];
+  if (directMin) {
+    return {
+      currency,
+      minDepositAmount: money(directMin),
+      baseCurrency: BASE_CURRENCY,
+      baseMinDepositAmount: Number(env.FIRST_DEPOSIT_BONUS_MIN_DEPOSIT_BDT || DEFAULT_BASE_MIN_DEPOSIT_BDT),
+      rate: null,
+      rateSource: 'env-direct-min-deposit',
+    };
+  }
+
+  const baseMinAmount = Number(env.FIRST_DEPOSIT_BONUS_MIN_DEPOSIT_BDT || DEFAULT_BASE_MIN_DEPOSIT_BDT);
+  const safeBaseMin = Number.isFinite(baseMinAmount) && baseMinAmount > 0 ? baseMinAmount : DEFAULT_BASE_MIN_DEPOSIT_BDT;
+  const rate = await getBdtToCurrencyRate(currency);
+
+  return {
+    currency,
+    minDepositAmount: money(safeBaseMin * rate),
+    baseCurrency: BASE_CURRENCY,
+    baseMinDepositAmount: safeBaseMin,
+    rate,
+    rateSource: envRates()[currency] ? 'env-rate' : (fallbackBdtRates[currency] ? 'live-or-fallback-rate' : 'fallback-bdt-rate'),
+  };
 }
 
 export async function getFirstDepositBonusCap(user = {}) {
@@ -313,9 +350,20 @@ export async function awardFirstDepositBonusForTransaction(depositTransaction) {
     };
   }
 
+  const minDeposit = await getFirstDepositBonusMinDeposit(user);
   const cap = await getFirstDepositBonusCap(user);
   const depositAmount = money(transaction.amount);
-  const capEnabled = boolEnv(env.FIRST_DEPOSIT_BONUS_CAP_ENABLED, false);
+  if (depositAmount < minDeposit.minDepositAmount) {
+    return {
+      awarded: false,
+      reason: 'deposit_below_first_deposit_bonus_minimum',
+      depositAmount,
+      minDepositAmount: minDeposit.minDepositAmount,
+      currency: minDeposit.currency,
+      eligibility,
+    };
+  }
+  const capEnabled = boolEnv(env.FIRST_DEPOSIT_BONUS_CAP_ENABLED, true);
   const bonusAmount = capEnabled ? money(Math.min(depositAmount, cap.capAmount)) : depositAmount;
   if (bonusAmount <= 0) return { awarded: false, reason: 'empty_bonus_amount' };
 
@@ -357,6 +405,10 @@ export async function awardFirstDepositBonusForTransaction(depositTransaction) {
         sourceDepositAmount: depositAmount,
         bonusAmount,
         currency: cap.currency,
+        minDepositAmount: minDeposit.minDepositAmount,
+        baseMinDepositAmount: minDeposit.baseMinDepositAmount,
+        minDepositRate: minDeposit.rate,
+        minDepositRateSource: minDeposit.rateSource,
         capAmount: cap.capAmount,
         baseCurrency: cap.baseCurrency,
         baseCapAmount: cap.baseCapAmount,
