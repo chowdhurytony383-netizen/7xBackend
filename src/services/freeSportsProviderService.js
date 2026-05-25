@@ -257,11 +257,28 @@ async function fetchJson(url, timeoutMs = Number(env.SPORTS_PROVIDER_TIMEOUT_MS 
   }
 }
 
-function nowStatus(commenceTime) {
+function liveWindowHoursForSport(sportKey = '', sportTitle = '') {
+  const clean = `${sportKey || ''} ${sportTitle || ''}`.toLowerCase();
+  if (clean.includes('cricket')) return Math.max(1, Number(process.env.SPORTS_CRICKET_LIVE_MAX_AGE_HOURS || 10));
+  if (clean.includes('soccer') || clean.includes('football') || clean.includes('epl') || clean.includes('uefa') || clean.includes('fifa')) {
+    return Math.max(1, Number(process.env.SPORTS_FOOTBALL_LIVE_MAX_AGE_HOURS || 4));
+  }
+  return Math.max(1, Number(process.env.SPORTS_LIVE_MAX_AGE_HOURS || env.SPORTS_HIDE_STARTED_OLDER_HOURS || 6));
+}
+
+function isPastLiveWindow(commenceTime, sportKey = '', sportTitle = '') {
+  const ts = commenceTime ? new Date(commenceTime).getTime() : 0;
+  if (!ts) return false;
+  const ageMs = Date.now() - ts;
+  return ageMs > liveWindowHoursForSport(sportKey, sportTitle) * 60 * 60 * 1000;
+}
+
+function nowStatus(commenceTime, sportKey = '', sportTitle = '') {
   const ts = commenceTime ? new Date(commenceTime).getTime() : 0;
   if (!ts) return 'UNKNOWN';
   const now = Date.now();
   if (ts > now + 15 * 60 * 1000) return 'UPCOMING';
+  if (isPastLiveWindow(commenceTime, sportKey, sportTitle)) return 'FINISHED';
   return 'LIVE';
 }
 
@@ -325,28 +342,46 @@ async function enrichTheOddsApiCricketEventScore(event, providerEvent = {}, spor
 }
 
 function oldEventCutoff() {
-  const hours = Math.max(1, Number(env.SPORTS_HIDE_STARTED_OLDER_HOURS || 24));
+  const hours = Math.max(1, Number(env.SPORTS_HIDE_STARTED_OLDER_HOURS || process.env.SPORTS_LIVE_MAX_AGE_HOURS || 6));
   return new Date(Date.now() - hours * 60 * 60 * 1000);
 }
 
 async function deactivateStaleSportsEvents(provider = 'theoddsapi') {
   const cutoff = oldEventCutoff();
-  const staleEvents = await SportsAutoEvent.find({
+  const broadCutoff = new Date(Date.now() - Math.max(24, Number(process.env.SPORTS_MAX_EVENT_RETENTION_HOURS || 72)) * 60 * 60 * 1000);
+
+  const candidates = await SportsAutoEvent.find({
     provider,
     isActive: true,
     $or: [
       { completed: true },
       { status: 'FINISHED' },
       { commenceTime: { $lt: cutoff } },
+      { commenceTime: { $lt: broadCutoff } },
     ],
-  }).select('providerEventId');
+  }).select('providerEventId commenceTime sportKey sportTitle status completed');
+
+  const staleEvents = candidates.filter((event) => (
+    event.completed
+    || event.status === 'FINISHED'
+    || isPastLiveWindow(event.commenceTime, event.sportKey, event.sportTitle)
+  ));
 
   if (!staleEvents.length) return { deactivatedEvents: 0, closedMarkets: 0, cutoff };
 
   const eventIds = staleEvents.map((event) => event.providerEventId);
   const eventsResult = await SportsAutoEvent.updateMany(
     { provider, providerEventId: { $in: eventIds } },
-    { $set: { isActive: false, status: 'FINISHED', lastProviderUpdate: new Date() } }
+    {
+      $set: {
+        isActive: false,
+        completed: true,
+        status: 'FINISHED',
+        lastProviderUpdate: new Date(),
+        'raw.autoClosedReason': 'Exceeded live match max age window',
+        'raw.autoClosedAt': new Date(),
+      },
+    }
   );
   const marketsResult = await SportsAutoMarket.updateMany(
     { provider, providerEventId: { $in: eventIds } },
@@ -506,11 +541,11 @@ async function upsertOddsEvent(providerEvent, sportKey) {
         homeTeam,
         awayTeam,
         commenceTime: providerEvent.commence_time ? new Date(providerEvent.commence_time) : undefined,
-        status: providerEvent.completed ? 'FINISHED' : nowStatus(providerEvent.commence_time),
+        status: providerEvent.completed ? 'FINISHED' : nowStatus(providerEvent.commence_time, providerEvent.sport_key || sportKey, sportTitle),
         completed: Boolean(providerEvent.completed),
         lastProviderUpdate: new Date(),
         raw: providerEvent,
-        isActive: !providerEvent.completed,
+        isActive: !providerEvent.completed && nowStatus(providerEvent.commence_time, providerEvent.sport_key || sportKey, sportTitle) !== 'FINISHED',
       },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -653,10 +688,10 @@ async function syncTheOddsApiScores() {
             $set: {
               scores,
               completed,
-              status: completed ? 'FINISHED' : nowStatus(item.commence_time),
+              status: completed ? 'FINISHED' : nowStatus(item.commence_time, sportKey, item.sport_title || ''),
               lastScoreUpdate: new Date(),
               lastProviderUpdate: new Date(),
-              isActive: !completed,
+              isActive: !completed && nowStatus(item.commence_time, sportKey, item.sport_title || '') !== 'FINISHED',
             },
           },
           { new: true }
