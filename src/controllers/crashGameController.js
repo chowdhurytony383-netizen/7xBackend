@@ -1,6 +1,6 @@
 import CrashRound from '../models/CrashRound.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { crashEngine, roundPublic } from '../gameEngines/crashEngine.js';
+import { crashEngine, roundPublic, normalizeSeat } from '../gameEngines/crashEngine.js';
 import { assertUserCanPlay } from '../utils/userPermissions.js';
 
 export const getCrashState = asyncHandler(async (req, res) => {
@@ -10,16 +10,29 @@ export const getCrashState = asyncHandler(async (req, res) => {
 
 export const placeCrashBet = asyncHandler(async (req, res) => {
   assertUserCanPlay(req.user);
-  const result = await crashEngine.placeBet(req.user._id, req.body.amount, req.body.autoCashout);
+  const result = await crashEngine.placeBet(
+    req.user._id,
+    req.body.amount,
+    req.body.autoCashout,
+    normalizeSeat(req.body.seat)
+  );
   res.status(201).json(result);
 });
 
 export const cashoutCrashBet = asyncHandler(async (req, res) => {
-  const result = await crashEngine.cashout(req.user._id);
+  assertUserCanPlay(req.user);
+  const result = await crashEngine.cashout(req.user._id, normalizeSeat(req.body.seat));
   res.json(result);
 });
 
 export const getCrashHistory = asyncHandler(async (_req, res) => {
-  const rounds = await CrashRound.find({ status: 'CRASHED' }).sort({ crashedAt: -1, createdAt: -1 }).limit(50).select('+serverSeed');
-  res.json({ success: true, rounds: rounds.map((round) => roundPublic(round, round.crashMultiplier)) });
+  const rounds = await CrashRound.find({ status: 'CRASHED' })
+    .sort({ crashedAt: -1, createdAt: -1 })
+    .limit(50)
+    .select('+serverSeed');
+
+  res.json({
+    success: true,
+    rounds: rounds.map((round) => roundPublic(round, round.crashMultiplier)),
+  });
 });
