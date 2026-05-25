@@ -184,7 +184,7 @@ const CATEGORY_META = {
 };
 
 function visibleEventCutoff() {
-  const hours = Math.max(1, Number(process.env.SPORTS_HIDE_STARTED_OLDER_HOURS || 24));
+  const hours = Math.max(1, Number(process.env.SPORTS_HIDE_STARTED_OLDER_HOURS || process.env.SPORTS_LIVE_MAX_AGE_HOURS || 6));
   return new Date(Date.now() - hours * 60 * 60 * 1000);
 }
 
@@ -200,10 +200,10 @@ function visibleEventFilter(extra = {}) {
       status: { $in: ['LIVE', 'UPCOMING'] },
     },
     {
-      // Cricket matches can stay LIVE for multiple days. Do not hide a live cricket
-      // match just because its original start time is older than the old-event cutoff.
+      // Do not keep yesterday's stale LIVE matches visible. If the provider score
+      // endpoint cannot confirm completion because of quota/rate limit, the event is
+      // still hidden after the configured live window.
       $or: [
-        { status: 'LIVE' },
         { commenceTime: { $gte: visibleEventCutoff() } },
         { commenceTime: { $exists: false } },
         { commenceTime: null },
