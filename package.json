@@ -18,7 +18,7 @@
     "sports:sync": "node src/seed/syncSportsNow.js",
     "sports:clear-old": "node src/seed/clearOldSportsEvents.js",
     "jili:seed-games": "node src/seed/seedJiliGames.js",
-    "bonus:first-deposit:reprocess": "node src/seed/reprocessFirstDepositBonuses.js"
+    "crash:fix-indexes": "node src/seed/fixCrashBetIndexes.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
