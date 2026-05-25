@@ -101,7 +101,7 @@ export async function initRealtimeSockets(server) {
       try {
         const currentUser = socket.user || await attachSocketUser(socket);
         if (!currentUser) throw new Error('Authentication required');
-        const result = await crashEngine.placeBet(currentUser._id, payload.amount, payload.autoCashout);
+        const result = await crashEngine.placeBet(currentUser._id, payload.amount, payload.autoCashout, payload.seat);
         socket.emit('crash:bet:placed', result);
         safeAck(ack, result);
       } catch (error) {
@@ -111,11 +111,11 @@ export async function initRealtimeSockets(server) {
       }
     });
 
-    socket.on('crash:cashout', async (_payload = {}, ack) => {
+    socket.on('crash:cashout', async (payload = {}, ack) => {
       try {
         const currentUser = socket.user || await attachSocketUser(socket);
         if (!currentUser) throw new Error('Authentication required');
-        const result = await crashEngine.cashout(currentUser._id);
+        const result = await crashEngine.cashout(currentUser._id, payload.seat);
         socket.emit('crash:cashout:success', result);
         safeAck(ack, result);
       } catch (error) {
