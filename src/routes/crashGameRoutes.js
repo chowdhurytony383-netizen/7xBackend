@@ -1,5 +1,10 @@
 import express from 'express';
-import { cashoutCrashBet, getCrashHistory, getCrashState, placeCrashBet } from '../controllers/crashGameController.js';
+import {
+  cashoutCrashBet,
+  getCrashHistory,
+  getCrashState,
+  placeCrashBet,
+} from '../controllers/crashGameController.js';
 import { optionalAuth, protect } from '../middleware/auth.js';
 
 const router = express.Router();
