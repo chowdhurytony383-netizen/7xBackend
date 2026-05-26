@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 
 const scoreSideSchema = new mongoose.Schema({
+  side: { type: String, default: '' },
+  teamId: { type: String, default: '' },
   name: { type: String, default: '' },
   score: { type: Number, default: 0 },
   wickets: { type: Number, default: null },
