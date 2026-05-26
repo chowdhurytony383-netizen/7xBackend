@@ -282,6 +282,59 @@ function nowStatus(commenceTime, sportKey = '', sportTitle = '') {
   return 'LIVE';
 }
 
+function scoreItemHasValue(item = {}) {
+  if (!item || typeof item !== 'object') return false;
+
+  const rawValues = [
+    item.score,
+    item.value,
+    item.display,
+    item.runs,
+    item.total,
+    item.points,
+    item.goals,
+  ];
+
+  if (rawValues.some((value) => value !== undefined && value !== null && value !== '')) return true;
+  if (item.overs !== undefined && item.overs !== null && item.overs !== '') return true;
+  if (item.wickets !== undefined && item.wickets !== null && item.wickets !== '') return true;
+
+  return false;
+}
+
+function providerScoresAvailable(scores) {
+  return Array.isArray(scores) && scores.some(scoreItemHasValue);
+}
+
+function theOddsApiOddsStatus(providerEvent = {}, sportKey = '', sportTitle = '') {
+  const completed = Boolean(providerEvent.completed);
+  if (completed) return 'FINISHED';
+
+  const start = providerEvent.commence_time || providerEvent.commenceTime || providerEvent.startTime;
+  const key = providerEvent.sport_key || sportKey;
+  const title = providerEvent.sport_title || sportTitle;
+
+  // The Odds API odds endpoint does not confirm that a match is actually in-play.
+  // It only gives start time + odds. So do NOT mark a match LIVE from time alone.
+  if (isPastLiveWindow(start, key, title)) return 'FINISHED';
+  return 'UPCOMING';
+}
+
+function theOddsApiScoreStatus(item = {}, existingEvent = {}, sportKey = '') {
+  const completed = Boolean(item.completed || existingEvent?.completed);
+  if (completed) return 'FINISHED';
+
+  const start = item.commence_time || existingEvent?.commenceTime;
+  const title = item.sport_title || existingEvent?.sportTitle || '';
+
+  // Only the scores endpoint can promote The Odds API event to LIVE.
+  // Upcoming odds with no score must stay UPCOMING, even if commence_time already passed.
+  if (providerScoresAvailable(item.scores)) return 'LIVE';
+  if (providerScoresAvailable(existingEvent?.scores)) return 'LIVE';
+  if (isPastLiveWindow(start, sportKey, title)) return 'FINISHED';
+  return 'UPCOMING';
+}
+
 function isCricketSportKey(sportKey = '', sportTitle = '') {
   return `${sportKey || ''} ${sportTitle || ''}`.toLowerCase().includes('cricket');
 }
@@ -578,6 +631,16 @@ async function upsertOddsEvent(providerEvent, sportKey) {
   const awayTeam = providerEvent.away_team || providerEvent.awayTeam || 'Away Team';
   const sportTitle = providerEvent.sport_title || providerEvent.sportTitle || sportKey;
   const league = providerEvent.sport_title || providerEvent.league || '';
+  const existingEvent = await SportsAutoEvent.findOne({ provider: 'theoddsapi', providerEventId })
+    .select('status scores completed commenceTime sportKey sportTitle')
+    .lean();
+  const oddsEventStatus = theOddsApiOddsStatus(providerEvent, sportKey, sportTitle);
+  const eventStatus = (
+    !providerEvent.completed
+    && existingEvent?.status === 'LIVE'
+    && providerScoresAvailable(existingEvent?.scores)
+    && !isPastLiveWindow(existingEvent?.commenceTime || providerEvent.commence_time, providerEvent.sport_key || sportKey, sportTitle)
+  ) ? 'LIVE' : oddsEventStatus;
 
   let event = await SportsAutoEvent.findOneAndUpdate(
     { provider: 'theoddsapi', providerEventId },
@@ -591,11 +654,11 @@ async function upsertOddsEvent(providerEvent, sportKey) {
         homeTeam,
         awayTeam,
         commenceTime: providerEvent.commence_time ? new Date(providerEvent.commence_time) : undefined,
-        status: providerEvent.completed ? 'FINISHED' : nowStatus(providerEvent.commence_time, providerEvent.sport_key || sportKey, sportTitle),
+        status: eventStatus,
         completed: Boolean(providerEvent.completed),
         lastProviderUpdate: new Date(),
         raw: providerEvent,
-        isActive: !providerEvent.completed && nowStatus(providerEvent.commence_time, providerEvent.sport_key || sportKey, sportTitle) !== 'FINISHED',
+        isActive: !providerEvent.completed && eventStatus !== 'FINISHED',
       },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -729,7 +792,7 @@ async function syncTheOddsApiScores() {
         if (!providerEventId) continue;
         const completed = Boolean(item.completed);
         const existingEvent = await SportsAutoEvent.findOne({ provider: 'theoddsapi', providerEventId }).lean();
-        const eventStatus = completed ? 'FINISHED' : nowStatus(item.commence_time || existingEvent?.commenceTime, sportKey, item.sport_title || existingEvent?.sportTitle || '');
+        const eventStatus = theOddsApiScoreStatus(item, existingEvent || {}, sportKey);
         const cricketScoreFromSportmonks = isCricketSportKey(sportKey, item.sport_title || existingEvent?.sportTitle || '');
 
         if (cricketScoreFromSportmonks && existingEvent) {
