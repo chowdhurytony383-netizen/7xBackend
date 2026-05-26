@@ -413,6 +413,55 @@ function scoreDisplayValue(event, teamName, side = '') {
   return `${scoreText}${wickets}${overs}`;
 }
 
+
+function scoreTextHasRealProgress(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text || text === '0' || text === '0-0' || text === '0:0' || text === '0/0') return false;
+
+  const cricketOver = text.match(/\((\d+(?:\.\d+)?)\s*ov\)/);
+  if (cricketOver) return Number.parseFloat(cricketOver[1]) > 0;
+
+  return /[1-9]/.test(text);
+}
+
+function scoreItemHasRealProgress(item = {}) {
+  if (!item || typeof item !== 'object') return false;
+
+  const numericValues = [
+    item.score,
+    item.value,
+    item.runs,
+    item.total,
+    item.points,
+    item.goals,
+  ];
+
+  if (numericValues.some((value) => Number(value || 0) > 0)) return true;
+
+  const overs = Number.parseFloat(String(item.overs || '0'));
+  if (Number.isFinite(overs) && overs > 0) return true;
+
+  return [item.display, item.label, item.description].some(scoreTextHasRealProgress);
+}
+
+function eventHasRealScoreProgress(event = {}) {
+  if (Array.isArray(event.scores) && event.scores.some(scoreItemHasRealProgress)) return true;
+
+  const score = event.score || {};
+  return [score.home, score.away, score.homeScore, score.awayScore].some(scoreTextHasRealProgress);
+}
+
+function strictDisplayStatus(event = {}) {
+  const rawStatus = String(event.status || '').trim().toUpperCase();
+  if (event.completed || ['FINISHED', 'COMPLETE', 'COMPLETED', 'CLOSED', 'CANCELLED', 'CANCELED'].includes(rawStatus)) return 'Finished';
+
+  // Never show LIVE from start time or odds-only data.
+  // LIVE is allowed only when real score progress exists (score > 0, goals/runs/points, or cricket overs > 0).
+  if (rawStatus === 'LIVE' && eventHasRealScoreProgress(event)) return 'Live';
+
+  return 'Upcoming';
+}
+
 function stableId(...parts) {
   return crypto.createHash('sha1').update(parts.filter(Boolean).join('|')).digest('hex').slice(0, 24);
 }
@@ -499,7 +548,7 @@ function formatAutoEventFromMarket(event, market = null) {
   const odds = marketToOdds(market, event);
   const homeScore = scoreDisplayValue(event, event.homeTeam, 'home');
   const awayScore = scoreDisplayValue(event, event.awayTeam, 'away');
-  const status = event.completed ? 'Finished' : event.status === 'LIVE' ? 'Live' : 'Upcoming';
+  const status = strictDisplayStatus(event);
   const category = categoryForEvent(event);
 
   return {
