@@ -282,28 +282,41 @@ function nowStatus(commenceTime, sportKey = '', sportTitle = '') {
   return 'LIVE';
 }
 
-function scoreItemHasValue(item = {}) {
+function scoreTextHasProgress(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text || text === '0' || text === '0-0' || text === '0:0' || text === '0/0') return false;
+
+  const cricketOver = text.match(/\((\d+(?:\.\d+)?)\s*ov\)/);
+  if (cricketOver) return Number.parseFloat(cricketOver[1]) > 0;
+
+  return /[1-9]/.test(text);
+}
+
+function scoreItemHasProgress(item = {}) {
   if (!item || typeof item !== 'object') return false;
 
-  const rawValues = [
+  const numericValues = [
     item.score,
     item.value,
-    item.display,
     item.runs,
     item.total,
     item.points,
     item.goals,
   ];
 
-  if (rawValues.some((value) => value !== undefined && value !== null && value !== '')) return true;
-  if (item.overs !== undefined && item.overs !== null && item.overs !== '') return true;
-  if (item.wickets !== undefined && item.wickets !== null && item.wickets !== '') return true;
+  if (numericValues.some((value) => Number(value || 0) > 0)) return true;
 
-  return false;
+  const overs = Number.parseFloat(String(item.overs || '0'));
+  if (Number.isFinite(overs) && overs > 0) return true;
+
+  return [item.display, item.label, item.status, item.description].some(scoreTextHasProgress);
 }
 
 function providerScoresAvailable(scores) {
-  return Array.isArray(scores) && scores.some(scoreItemHasValue);
+  // Strict mode: a scores array containing only 0/0 or 0-0 is NOT enough to call a match LIVE.
+  // This prevents Tennis/Football/etc. from being shown as LIVE just because the start time passed
+  // or a score shell exists. A match becomes LIVE only when real score progress is present.
+  return Array.isArray(scores) && scores.some(scoreItemHasProgress);
 }
 
 function theOddsApiOddsStatus(providerEvent = {}, sportKey = '', sportTitle = '') {
