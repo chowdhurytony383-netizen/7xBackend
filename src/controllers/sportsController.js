@@ -44,6 +44,50 @@ function sportsProviderName() {
   );
 }
 
+function sportsProviderStorageNames(provider = sportsProviderName()) {
+  const normalized = normalizeProviderName(provider);
+  if (['sportmonks', 'sportmonks-cricket', 'sportmonks_cricket', 'sportmonks-football', 'sportmonks_football'].includes(normalized)) {
+    return ['sportmonks'];
+  }
+  return [normalized];
+}
+
+function sportsProviderStorageFilter(provider = sportsProviderName()) {
+  const names = sportsProviderStorageNames(provider).filter(Boolean);
+  if (!names.length) return {};
+  return names.length === 1 ? { provider: names[0] } : { provider: { $in: names } };
+}
+
+function sportsProviderEventScopeFilter(provider = sportsProviderName()) {
+  const normalized = normalizeProviderName(provider);
+  if (normalized === 'sportmonks-cricket' || normalized === 'sportmonks_cricket') {
+    return {
+      $or: [
+        { sportKey: /cricket/i },
+        { sportTitle: /cricket|ipl|indian premier/i },
+        { league: /cricket|ipl|indian premier/i },
+      ],
+    };
+  }
+
+  if (normalized === 'sportmonks-football' || normalized === 'sportmonks_football') {
+    return {
+      $or: [
+        { sportKey: /football|soccer/i },
+        { sportTitle: /football|soccer/i },
+        { league: /football|soccer|premier|laliga|bundesliga|serie|ligue|uefa|fifa/i },
+      ],
+    };
+  }
+
+  return null;
+}
+
+function sportsProviderLogFilter(provider = sportsProviderName()) {
+  if (shouldShowAllSportsProviders()) return {};
+  return sportsProviderStorageFilter(provider);
+}
+
 function sportsApiKeyConfigured() {
   const provider = sportsProviderName();
   if (provider === 'apisports' || provider === 'api-sports' || provider === 'api_sports') {
@@ -189,7 +233,8 @@ function visibleEventCutoff() {
 }
 
 function visibleEventFilter(extra = {}) {
-  const providerFilter = shouldShowAllSportsProviders() ? {} : { provider: sportsProviderName() };
+  const providerFilter = shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter();
+  const providerScopeFilter = shouldShowAllSportsProviders() ? null : sportsProviderEventScopeFilter();
   const { $or: extraOr, ...restExtra } = extra || {};
 
   const andFilters = [
@@ -211,6 +256,7 @@ function visibleEventFilter(extra = {}) {
     },
   ];
 
+  if (providerScopeFilter) andFilters.push(providerScopeFilter);
   if (extraOr) andFilters.push({ $or: extraOr });
 
   return {
@@ -241,7 +287,7 @@ function sportQueryAliases(query = '') {
     football: ['soccer', 'football', 'epl', 'uefa', 'fifa', 'laliga', 'bundesliga', 'seriea', 'ligue', 'mls'],
     soccer: ['soccer', 'football', 'epl', 'uefa', 'fifa', 'laliga', 'bundesliga', 'seriea', 'ligue', 'mls'],
     americanfootball: ['americanfootball', 'nfl', 'ncaaf', 'cfl'],
-    cricket: ['cricket'],
+    cricket: ['cricket', 'ipl', 'indianpremierleague', 't20', 'odi', 'test'],
     basketball: ['basketball', 'nba', 'ncaab', 'wnba'],
     tennis: ['tennis', 'atp', 'wta'],
     hockey: ['icehockey', 'hockey', 'nhl'],
@@ -609,7 +655,7 @@ export const liveMatches = asyncHandler(async (req, res) => {
   if (requireRealOddsForList()) {
     const provider = sportsProviderName();
     const marketFilter = {
-      ...(shouldShowAllSportsProviders() ? {} : { provider }),
+      ...(shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter(provider)),
       status: 'OPEN',
       selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
     };
@@ -652,7 +698,7 @@ export const matchOfTheDay = asyncHandler(async (_req, res) => {
   if (requireRealOddsForList()) {
     const provider = sportsProviderName();
     const marketEventIds = await SportsAutoMarket.distinct('event', {
-      ...(shouldShowAllSportsProviders() ? {} : { provider }),
+      ...(shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter(provider)),
       status: 'OPEN',
       selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
     });
@@ -757,23 +803,31 @@ export const settleNow = asyncHandler(async (_req, res) => {
 
 export const syncStatus = asyncHandler(async (_req, res) => {
   const provider = sportsProviderName();
-  const [lastOdds, lastScores, lastSettlement, events, openMarkets, openBets] = await Promise.all([
-    SportsSyncLog.findOne({ type: 'odds', provider }).sort({ createdAt: -1 }).lean(),
-    SportsSyncLog.findOne({ type: 'scores', provider }).sort({ createdAt: -1 }).lean(),
+  const eventFilter = visibleEventFilter();
+  const logFilter = sportsProviderLogFilter(provider);
+  const marketProviderFilter = shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter(provider);
+
+  const [lastOdds, lastScores, lastSettlement, events, visibleEventIds, openBets] = await Promise.all([
+    SportsSyncLog.findOne({ type: 'odds', ...logFilter }).sort({ createdAt: -1 }).lean(),
+    SportsSyncLog.findOne({ type: 'scores', ...logFilter }).sort({ createdAt: -1 }).lean(),
     SportsSyncLog.findOne({ type: 'settlement' }).sort({ createdAt: -1 }).lean(),
-    SportsAutoEvent.countDocuments(visibleEventFilter()),
-    SportsAutoMarket.countDocuments({
-      ...(shouldShowAllSportsProviders() ? {} : { provider }),
-      status: 'OPEN',
-      selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
-    }),
+    SportsAutoEvent.countDocuments(eventFilter),
+    SportsAutoEvent.distinct('_id', eventFilter),
     SportsAutoBet.countDocuments({ status: 'OPEN' }),
   ]);
+
+  const openMarkets = await SportsAutoMarket.countDocuments({
+    ...marketProviderFilter,
+    event: { $in: visibleEventIds },
+    status: 'OPEN',
+    selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
+  });
 
   res.json({
     success: true,
     data: {
       provider,
+      storageProviders: shouldShowAllSportsProviders() ? ['all'] : sportsProviderStorageNames(provider),
       enabled: sportsApiKeyConfigured(),
       detailsProvider: process.env.SPORTS_DETAILS_PROVIDER || 'hybrid',
       detailsEnabled: sportsDetailsConfigured(),
