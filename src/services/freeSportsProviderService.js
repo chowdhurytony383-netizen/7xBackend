@@ -305,6 +305,11 @@ async function enrichTheOddsApiCricketEventScore(event, providerEvent = {}, spor
 
     if (!details?.available || !Array.isArray(details.scoreSummary) || !details.scoreSummary.length) return event;
 
+    const sportmonksStatus = String(details.status || '').toUpperCase();
+    const sportmonksCompleted = ['FINISHED', 'CANCELLED'].includes(sportmonksStatus);
+    const nextStatus = sportmonksStatus || plainEvent.status || 'UNKNOWN';
+    const providerCompleted = Boolean(providerEvent.completed || plainEvent.completed);
+
     const updated = await SportsAutoEvent.findByIdAndUpdate(
       event._id,
       {
@@ -320,6 +325,9 @@ async function enrichTheOddsApiCricketEventScore(event, providerEvent = {}, spor
             label: score.label || score.name || '',
             display: score.display || '',
           })),
+          status: nextStatus,
+          completed: sportmonksCompleted || providerCompleted,
+          isActive: !(sportmonksCompleted || providerCompleted),
           lastScoreUpdate: new Date(),
           raw: {
             ...(plainEvent.raw || {}),
@@ -721,8 +729,30 @@ async function syncTheOddsApiScores() {
         if (!providerEventId) continue;
         const completed = Boolean(item.completed);
         const existingEvent = await SportsAutoEvent.findOne({ provider: 'theoddsapi', providerEventId }).lean();
-        const scores = normalizeTheOddsApiScores(item.scores, existingEvent || {}, item);
         const eventStatus = completed ? 'FINISHED' : nowStatus(item.commence_time || existingEvent?.commenceTime, sportKey, item.sport_title || existingEvent?.sportTitle || '');
+        const cricketScoreFromSportmonks = isCricketSportKey(sportKey, item.sport_title || existingEvent?.sportTitle || '');
+
+        if (cricketScoreFromSportmonks && existingEvent) {
+          const baseEvent = await SportsAutoEvent.findOneAndUpdate(
+            { provider: 'theoddsapi', providerEventId },
+            {
+              $set: {
+                completed,
+                status: eventStatus,
+                lastProviderUpdate: new Date(),
+                isActive: !completed && eventStatus !== 'FINISHED',
+              },
+            },
+            { new: true }
+          );
+
+          await enrichTheOddsApiCricketEventScore(baseEvent || existingEvent, item, sportKey);
+          stats.events += 1;
+          if (completed || baseEvent?.completed) stats.finished += 1;
+          continue;
+        }
+
+        const scores = normalizeTheOddsApiScores(item.scores, existingEvent || {}, item);
 
         await SportsAutoEvent.findOneAndUpdate(
           { provider: 'theoddsapi', providerEventId },

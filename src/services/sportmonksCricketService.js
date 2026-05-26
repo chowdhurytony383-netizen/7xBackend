@@ -157,13 +157,47 @@ function readStartingAt(fixture = {}) {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
+function oversToBalls(value) {
+  if (value === undefined || value === null || value === '') return 0;
+  const text = String(value).trim();
+  if (!text) return 0;
+  const [oversPart, ballsPart = '0'] = text.split('.');
+  const overs = Number(oversPart);
+  const balls = Number(ballsPart);
+  if (!Number.isFinite(overs)) return 0;
+  return Math.max(0, overs) * 6 + Math.max(0, Number.isFinite(balls) ? balls : 0);
+}
+
+function hasCompletedLimitedOversChase(fixture = {}) {
+  const raw = `${fixture.status || ''} ${fixture.status_note || ''} ${fixture.note || ''} ${fixture.result || ''}`.toLowerCase();
+  if (!raw.includes('2nd innings') && !raw.includes('second innings')) return false;
+
+  const runs = runsForFixture(fixture);
+  const secondInnings = runs
+    .filter((run) => Number(run.inning ?? run.innings ?? 0) >= 2)
+    .slice()
+    .sort((a, b) => Number(a.inning ?? a.innings ?? 0) - Number(b.inning ?? b.innings ?? 0))
+    .at(-1);
+
+  if (!secondInnings) return false;
+
+  const wickets = Number(secondInnings.wickets ?? secondInnings.wicket ?? secondInnings.wickets_lost ?? 0);
+  if (Number.isFinite(wickets) && wickets >= 10) return true;
+
+  const totalOvers = Number(fixture.total_overs_played || fixture.total_overs || fixture.overs || 0);
+  const totalBalls = Number.isFinite(totalOvers) && totalOvers > 0 ? totalOvers * 6 : 0;
+  const playedBalls = oversToBalls(secondInnings.overs ?? secondInnings.over ?? '');
+
+  return Boolean(totalBalls && playedBalls >= totalBalls);
+}
+
 function normalizeStatus(fixture = {}) {
   const raw = `${fixture.status || ''} ${fixture.status_note || ''} ${fixture.note || ''} ${fixture.result || ''} ${fixture.type || ''}`.toLowerCase();
   const start = readStartingAt(fixture);
   const now = Date.now();
 
   if (raw.includes('cancel') || raw.includes('abandon') || raw.includes('postpon')) return 'CANCELLED';
-  if (raw.includes('finished') || raw.includes('complete') || raw.includes('ended') || raw.includes('result')) return 'FINISHED';
+  if (raw.includes('finished') || raw.includes('complete') || raw.includes('ended') || raw.includes('result') || hasCompletedLimitedOversChase(fixture)) return 'FINISHED';
   if (raw.includes('live') || raw.includes('inplay') || raw.includes('in play') || raw.includes('innings') || raw.includes('stumps') || raw.includes('lunch') || raw.includes('tea') || raw.includes('break')) return 'LIVE';
   if (start && start.getTime() <= now && start.getTime() >= now - 36 * 60 * 60 * 1000) return 'LIVE';
   if (start && start.getTime() > now) return 'UPCOMING';
