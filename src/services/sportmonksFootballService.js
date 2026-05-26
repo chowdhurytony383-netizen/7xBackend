@@ -249,9 +249,24 @@ function scoreForParticipant(fixture = {}, participant = {}) {
 function aggregateFootballScores(fixture = {}) {
   const home = findSideParticipant(fixture, 'home');
   const away = findSideParticipant(fixture, 'away');
+  const homeScore = scoreForParticipant(fixture, home);
+  const awayScore = scoreForParticipant(fixture, away);
+
   return [
-    { name: participantName(home, 'Home Team'), score: scoreForParticipant(fixture, home) },
-    { name: participantName(away, 'Away Team'), score: scoreForParticipant(fixture, away) },
+    {
+      side: 'home',
+      teamId: participantId(home) ? String(participantId(home)) : '',
+      name: participantName(home, 'Home Team'),
+      score: homeScore,
+      display: String(homeScore),
+    },
+    {
+      side: 'away',
+      teamId: participantId(away) ? String(participantId(away)) : '',
+      name: participantName(away, 'Away Team'),
+      score: awayScore,
+      display: String(awayScore),
+    },
   ];
 }
 

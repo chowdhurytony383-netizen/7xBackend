@@ -280,14 +280,31 @@ function getTeamId(team = {}) {
   return team.id || team.team_id || team.localteam_id || team.visitorteam_id;
 }
 
-function teamMapForFixture(fixture = {}) {
+function fixtureSideInfo(fixture = {}) {
   const local = localTeam(fixture);
   const visitor = visitorTeam(fixture);
   const localId = getTeamId(local) || fixture.localteam_id || fixture.local_team_id || fixture.home_team_id;
   const visitorId = getTeamId(visitor) || fixture.visitorteam_id || fixture.visitor_team_id || fixture.away_team_id;
+
+  return {
+    home: {
+      side: 'home',
+      teamId: localId !== undefined && localId !== null ? String(localId) : '',
+      name: teamName(local, fixture.localteam_id ? `Team ${fixture.localteam_id}` : 'Home Team'),
+    },
+    away: {
+      side: 'away',
+      teamId: visitorId !== undefined && visitorId !== null ? String(visitorId) : '',
+      name: teamName(visitor, fixture.visitorteam_id ? `Team ${fixture.visitorteam_id}` : 'Away Team'),
+    },
+  };
+}
+
+function teamMapForFixture(fixture = {}) {
+  const sides = fixtureSideInfo(fixture);
   const map = new Map();
-  if (localId !== undefined) map.set(String(localId), teamName(local, 'Home Team'));
-  if (visitorId !== undefined) map.set(String(visitorId), teamName(visitor, 'Away Team'));
+  if (sides.home.teamId) map.set(sides.home.teamId, sides.home);
+  if (sides.away.teamId) map.set(sides.away.teamId, sides.away);
   return map;
 }
 
@@ -314,15 +331,28 @@ function formatCricketScore(score = 0, wickets = null, overs = '') {
   return `${scorePart}${wicketsPart}${oversPart}`;
 }
 
-function runTeamName(run = {}, fixture = {}) {
+function runSideInfo(run = {}, fixture = {}) {
   const map = teamMapForFixture(fixture);
   const teamId = run.team_id || run.team?.id || run.teamId;
-  return map.get(String(teamId)) || teamName(run.team?.data || run.team, '');
+  const mapped = teamId !== undefined && teamId !== null ? map.get(String(teamId)) : null;
+  if (mapped) return mapped;
+
+  const fallbackName = teamName(run.team?.data || run.team, '');
+  return {
+    side: '',
+    teamId: teamId !== undefined && teamId !== null ? String(teamId) : '',
+    name: fallbackName,
+  };
+}
+
+function runTeamName(run = {}, fixture = {}) {
+  return runSideInfo(run, fixture).name || '';
 }
 
 function normalizeCricketRuns(fixture = {}) {
   return runsForFixture(fixture).map((run, index) => {
-    const name = runTeamName(run, fixture) || `Innings ${index + 1}`;
+    const sideInfo = runSideInfo(run, fixture);
+    const name = sideInfo.name || `Innings ${index + 1}`;
     const score = extractNumericScore(run);
     const wickets = run.wickets ?? run.wicket ?? run.wickets_lost ?? null;
     const overs = formatOvers(run.overs ?? run.over ?? '');
@@ -330,9 +360,10 @@ function normalizeCricketRuns(fixture = {}) {
     const display = formatCricketScore(score, wickets, overs);
     return {
       id: run.id || `${name}-${inning}-${index}`,
+      side: sideInfo.side,
       name,
       team: name,
-      teamId: run.team_id || run.team?.id || null,
+      teamId: sideInfo.teamId || (run.team_id || run.team?.id || null),
       inning,
       label: `${name} · Innings ${inning}`,
       score,
@@ -347,39 +378,57 @@ function normalizeCricketRuns(fixture = {}) {
 
 function aggregateCricketScores(fixture = {}) {
   const normalizedRuns = normalizeCricketRuns(fixture);
-  const totals = new Map();
-  const latestMeta = new Map();
+  const sides = fixtureSideInfo(fixture);
 
-  for (const run of normalizedRuns) {
-    const name = run.name;
-    if (!name) continue;
-    totals.set(name, (totals.get(name) || 0) + Number(run.score || 0));
-    latestMeta.set(name, {
-      wickets: run.wickets,
-      overs: run.overs,
-      inning: run.inning,
-      label: run.label,
+  function scoreForSide(sideInfo) {
+    const matchingRuns = normalizedRuns.filter((run) => {
+      if (run.side && run.side === sideInfo.side) return true;
+      if (sideInfo.teamId && String(run.teamId || '') === String(sideInfo.teamId)) return true;
+      return false;
     });
-  }
 
-  const local = teamName(localTeam(fixture), 'Home Team');
-  const visitor = teamName(visitorTeam(fixture), 'Away Team');
-  if (!totals.has(local)) totals.set(local, 0);
-  if (!totals.has(visitor)) totals.set(visitor, 0);
+    const totalScore = matchingRuns.reduce((sum, run) => sum + Number(run.score || 0), 0);
+    const latest = matchingRuns
+      .slice()
+      .sort((a, b) => Number(a.inning || 0) - Number(b.inning || 0))
+      .at(-1) || {};
+    const display = matchingRuns.length
+      ? formatCricketScore(totalScore, latest.wickets, latest.overs)
+      : '0';
 
-  return [...totals.entries()].map(([name, score]) => {
-    const meta = latestMeta.get(name) || {};
-    const display = formatCricketScore(score, meta.wickets, meta.overs);
     return {
-      name,
-      score,
-      wickets: meta.wickets ?? null,
-      overs: meta.overs || '',
-      inning: meta.inning ?? null,
-      label: meta.label || name,
+      side: sideInfo.side,
+      teamId: sideInfo.teamId || '',
+      name: sideInfo.name,
+      score: totalScore,
+      wickets: latest.wickets ?? null,
+      overs: latest.overs || '',
+      inning: latest.inning ?? null,
+      label: latest.label || sideInfo.name,
       display,
     };
+  }
+
+  const summary = [scoreForSide(sides.home), scoreForSide(sides.away)];
+
+  const knownKeys = new Set(summary.flatMap((score) => [score.side, score.teamId, score.name].filter(Boolean).map(String)));
+  normalizedRuns.forEach((run) => {
+    const keys = [run.side, run.teamId, run.name].filter(Boolean).map(String);
+    if (keys.some((key) => knownKeys.has(key))) return;
+    summary.push({
+      side: run.side || '',
+      teamId: run.teamId ? String(run.teamId) : '',
+      name: run.name,
+      score: Number(run.score || 0),
+      wickets: run.wickets ?? null,
+      overs: run.overs || '',
+      inning: run.inning ?? null,
+      label: run.label || run.name,
+      display: run.display || formatCricketScore(run.score, run.wickets, run.overs),
+    });
   });
+
+  return summary;
 }
 
 function playerName(value = {}, fallback = '') {

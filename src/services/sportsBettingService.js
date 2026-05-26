@@ -18,7 +18,15 @@ function roundMoney(value) {
 }
 
 function normalizeName(value = '') {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/bengaluru/g, 'bangalore')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\b(fc|cf|sc|club|team|the|men|women|xi|united|city|town|athletic|sporting)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function boolEnv(name, fallback = false) {
@@ -65,15 +73,29 @@ function canUseSyntheticDraw(event, marketKey, selectionId) {
   );
 }
 
-function scoreForTeam(event, teamName) {
+function scoreEntryForTeam(event, teamName, side = '') {
   const scores = Array.isArray(event?.scores) ? event.scores : [];
-  const found = scores.find((score) => normalizeName(score.name) === normalizeName(teamName));
+  if (side) {
+    const bySide = scores.find((score) => String(score.side || '').toLowerCase() === String(side).toLowerCase());
+    if (bySide) return bySide;
+  }
+
+  const normalizedTeam = normalizeName(teamName);
+  return scores.find((score) => {
+    const normalizedScoreName = normalizeName(score.name || score.label || '');
+    return normalizedScoreName === normalizedTeam
+      || (normalizedScoreName && normalizedTeam && (normalizedScoreName.includes(normalizedTeam) || normalizedTeam.includes(normalizedScoreName)));
+  }) || null;
+}
+
+function scoreForTeam(event, teamName, side = '') {
+  const found = scoreEntryForTeam(event, teamName, side);
   return Number(found?.score ?? 0);
 }
 
 function getH2hWinner(event) {
-  const homeScore = scoreForTeam(event, event.homeTeam);
-  const awayScore = scoreForTeam(event, event.awayTeam);
+  const homeScore = scoreForTeam(event, event.homeTeam, 'home');
+  const awayScore = scoreForTeam(event, event.awayTeam, 'away');
 
   if (homeScore > awayScore) return event.homeTeam;
   if (awayScore > homeScore) return event.awayTeam;

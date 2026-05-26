@@ -310,6 +310,8 @@ async function enrichTheOddsApiCricketEventScore(event, providerEvent = {}, spor
       {
         $set: {
           scores: details.scoreSummary.map((score) => ({
+            side: score.side || '',
+            teamId: score.teamId !== undefined && score.teamId !== null ? String(score.teamId) : '',
             name: score.name || '',
             score: Number(score.score || 0),
             wickets: score.wickets ?? null,
@@ -415,6 +417,46 @@ function syntheticDrawSelectionId(eventId, marketKey = 'h2h') {
 function syntheticDrawOdds() {
   const value = Number(process.env.SPORTS_SYNTHETIC_DRAW_ODDS || process.env.SPORTS_DRAW_ODDS || 3.25);
   return Number.isFinite(value) && value > 1 ? value : 3.25;
+}
+
+function normalizeScoreName(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/bengaluru/g, 'bangalore')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\b(fc|cf|sc|club|team|the|men|women|xi|united|city|town|athletic|sporting)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreSideFromName(scoreName = '', homeTeam = '', awayTeam = '') {
+  const score = normalizeScoreName(scoreName);
+  const home = normalizeScoreName(homeTeam);
+  const away = normalizeScoreName(awayTeam);
+  if (!score) return '';
+  if (home && score === home) return 'home';
+  if (away && score === away) return 'away';
+  if (home && (score.includes(home) || home.includes(score))) return 'home';
+  if (away && (score.includes(away) || away.includes(score))) return 'away';
+  return '';
+}
+
+function normalizeTheOddsApiScores(scores = [], event = {}, item = {}) {
+  const rawScores = Array.isArray(scores) ? scores : [];
+  return rawScores.map((score) => {
+    const name = score.name || '';
+    const side = scoreSideFromName(name, event.homeTeam || item.home_team, event.awayTeam || item.away_team);
+    return {
+      side,
+      name,
+      score: Number(score.score || 0),
+      display: String(score.score ?? 0),
+    };
+  }).sort((left, right) => {
+    const rank = { home: 0, away: 1 };
+    return (rank[left.side] ?? 9) - (rank[right.side] ?? 9);
+  });
 }
 
 function sportAllowsDraw(sportKey = '', sportTitle = '') {
@@ -678,9 +720,9 @@ async function syncTheOddsApiScores() {
         const providerEventId = String(item.id || '');
         if (!providerEventId) continue;
         const completed = Boolean(item.completed);
-        const scores = Array.isArray(item.scores)
-          ? item.scores.map((score) => ({ name: score.name || '', score: Number(score.score || 0) }))
-          : [];
+        const existingEvent = await SportsAutoEvent.findOne({ provider: 'theoddsapi', providerEventId }).lean();
+        const scores = normalizeTheOddsApiScores(item.scores, existingEvent || {}, item);
+        const eventStatus = completed ? 'FINISHED' : nowStatus(item.commence_time || existingEvent?.commenceTime, sportKey, item.sport_title || existingEvent?.sportTitle || '');
 
         await SportsAutoEvent.findOneAndUpdate(
           { provider: 'theoddsapi', providerEventId },
@@ -688,10 +730,10 @@ async function syncTheOddsApiScores() {
             $set: {
               scores,
               completed,
-              status: completed ? 'FINISHED' : nowStatus(item.commence_time, sportKey, item.sport_title || ''),
+              status: eventStatus,
               lastScoreUpdate: new Date(),
               lastProviderUpdate: new Date(),
-              isActive: !completed && nowStatus(item.commence_time, sportKey, item.sport_title || '') !== 'FINISHED',
+              isActive: !completed && eventStatus !== 'FINISHED',
             },
           },
           { new: true }

@@ -272,6 +272,30 @@ function getAwayName(item = {}) {
   );
 }
 
+function getHomeId(item = {}) {
+  return firstString(
+    item?.teams?.home?.id,
+    item?.participants?.home?.id,
+    item?.home?.id,
+    item?.homeTeam?.id,
+    item?.competitors?.home?.id,
+    item?.fighters?.first?.id,
+    item?.team?.home?.id
+  );
+}
+
+function getAwayId(item = {}) {
+  return firstString(
+    item?.teams?.away?.id,
+    item?.participants?.away?.id,
+    item?.away?.id,
+    item?.awayTeam?.id,
+    item?.competitors?.away?.id,
+    item?.fighters?.second?.id,
+    item?.team?.away?.id
+  );
+}
+
 function getLeagueName(config, item = {}) {
   return firstString(
     item?.league?.name,
@@ -361,8 +385,20 @@ function normalizeApiSportsFixture(config, item = {}) {
     status,
     completed,
     scores: [
-      { name: homeTeam, score: scoreSide(item, 'home') },
-      { name: awayTeam, score: scoreSide(item, 'away') },
+      {
+        side: 'home',
+        teamId: getHomeId(item),
+        name: homeTeam,
+        score: scoreSide(item, 'home'),
+        display: String(scoreSide(item, 'home')),
+      },
+      {
+        side: 'away',
+        teamId: getAwayId(item),
+        name: awayTeam,
+        score: scoreSide(item, 'away'),
+        display: String(scoreSide(item, 'away')),
+      },
     ],
     raw: item,
   };
