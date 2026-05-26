@@ -140,7 +140,7 @@ app.use('/api/bet', betRoutes);
 app.use('/api/games/7x-crush', crushProviderLaunchRoutes);
 
 app.use('/api/games', gameRoutes);
-app.use('/api/crash', crashGameRoutes);
+app.use('/api/crash-native', crashGameRoutes);
 app.use('/api/crypto', cryptoRoutes);
 app.use('/api/source-games', sourceGameRoutes);
 app.use('/api/jili', jiliRoutes);
