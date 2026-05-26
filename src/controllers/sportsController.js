@@ -327,14 +327,38 @@ function teamObjectForEvent(event = {}, side = 'home') {
   return teamObject(name, event.sportKey, source);
 }
 
-function scoreEntryForTeam(event, teamName) {
-  return (event.scores || []).find((score) => String(score.name || '').toLowerCase() === String(teamName || '').toLowerCase());
+function normalizeScoreName(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/bengaluru/g, 'bangalore')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\b(fc|cf|sc|club|team|the|men|women|xi|united|city|town|athletic|sporting)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function scoreDisplayValue(event, teamName) {
-  const found = scoreEntryForTeam(event, teamName);
+function scoreEntryForTeam(event, teamName, side = '') {
+  const scores = Array.isArray(event?.scores) ? event.scores : [];
+  if (side) {
+    const bySide = scores.find((score) => String(score.side || '').toLowerCase() === String(side).toLowerCase());
+    if (bySide) return bySide;
+  }
+
+  const normalizedTeam = normalizeScoreName(teamName);
+  if (!normalizedTeam) return null;
+
+  return scores.find((score) => {
+    const normalizedScoreName = normalizeScoreName(score.name || score.label || '');
+    return normalizedScoreName === normalizedTeam
+      || (normalizedScoreName && normalizedTeam && (normalizedScoreName.includes(normalizedTeam) || normalizedTeam.includes(normalizedScoreName)));
+  }) || null;
+}
+
+function scoreDisplayValue(event, teamName, side = '') {
+  const found = scoreEntryForTeam(event, teamName, side);
   if (!found) return 0;
-  if (found.display) return found.display;
+  if (found.display !== undefined && found.display !== null && found.display !== '') return found.display;
 
   const score = Number(found.score || 0);
   const scoreText = Number.isFinite(score) ? String(score) : String(found.score || 0);
@@ -427,8 +451,8 @@ function marketToOdds(market, event = {}) {
 
 function formatAutoEventFromMarket(event, market = null) {
   const odds = marketToOdds(market, event);
-  const homeScore = scoreDisplayValue(event, event.homeTeam);
-  const awayScore = scoreDisplayValue(event, event.awayTeam);
+  const homeScore = scoreDisplayValue(event, event.homeTeam, 'home');
+  const awayScore = scoreDisplayValue(event, event.awayTeam, 'away');
   const status = event.completed ? 'Finished' : event.status === 'LIVE' ? 'Live' : 'Upcoming';
   const category = categoryForEvent(event);
 
