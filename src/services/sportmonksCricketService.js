@@ -72,7 +72,7 @@ function timeoutMs() {
 }
 
 function cacheTtlMs() {
-  return Math.max(30, number(process.env.SPORTS_DETAILS_CACHE_SECONDS, 120)) * 1000;
+  return Math.max(5, number(process.env.SPORTS_DETAILS_CACHE_SECONDS, 20)) * 1000;
 }
 
 function makeUrl(path, params = {}) {

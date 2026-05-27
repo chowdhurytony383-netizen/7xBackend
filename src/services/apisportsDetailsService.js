@@ -21,7 +21,7 @@ function timeoutMs() {
 
 function ttlMs() {
   const value = Number(process.env.APISPORTS_CACHE_SECONDS || process.env.SPORTS_DETAILS_CACHE_SECONDS || 120);
-  return Math.max(15, Number.isFinite(value) ? value : 120) * 1000;
+  return Math.max(5, Number.isFinite(value) ? value : 20) * 1000;
 }
 
 function threshold() {

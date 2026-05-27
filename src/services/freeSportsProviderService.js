@@ -4,9 +4,10 @@ import { env } from '../config/env.js';
 import SportsAutoEvent from '../models/SportsAutoEvent.js';
 import SportsAutoMarket from '../models/SportsAutoMarket.js';
 import SportsSyncLog from '../models/SportsSyncLog.js';
-import { clearApiSportsStaleEvents, syncApiSportsOdds, syncApiSportsScores } from './apiSportsOddsProviderService.js';
+import { apiSportsOddsProviderConfigured, clearApiSportsStaleEvents, syncApiSportsOdds, syncApiSportsScores } from './apiSportsOddsProviderService.js';
 import { clearSportmonksCricketStaleEvents, getSportmonksCricketMatchDetails, sportmonksCricketConfigured, syncSportmonksCricketOdds, syncSportmonksCricketScores } from './sportmonksCricketService.js';
 import { clearSportmonksFootballStaleEvents, sportmonksFootballConfigured, syncSportmonksFootballOdds, syncSportmonksFootballScores } from './sportmonksFootballService.js';
+import { mergeOfficialScoresIntoOddsEvents } from './sportsRealtimeMergeService.js';
 
 const THE_ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const DEFAULT_SPORT_KEYS = [
@@ -45,7 +46,7 @@ const THE_ODDS_SPORT_GROUPS = {
   americanfootball: ['americanfootball_'],
   nfl: ['americanfootball_nfl'],
   rugby: ['rugbyleague_', 'rugbyunion_'],
-  volleyball: ['volleyball'],
+  volleyball: [],
   handball: ['handball_'],
   mma: ['mma_'],
   boxing: ['boxing_'],
@@ -107,7 +108,7 @@ const THE_ODDS_STATIC_ALIASES = {
   hockey: ['icehockey_nhl', 'icehockey_sweden_hockey_league', 'icehockey_sweden_allsvenskan'],
   icehockey: ['icehockey_nhl', 'icehockey_sweden_hockey_league', 'icehockey_sweden_allsvenskan'],
   rugby: ['rugbyleague_nrl', 'rugbyunion_six_nations', 'rugbyunion_super_rugby'],
-  volleyball: ['volleyball'],
+  volleyball: [],
   baseball: ['baseball_mlb', 'baseball_npb', 'baseball_kbo'],
   americanfootball: ['americanfootball_nfl', 'americanfootball_ncaaf', 'americanfootball_cfl'],
   nfl: ['americanfootball_nfl'],
@@ -1009,11 +1010,80 @@ export async function syncSportsScores({ force = false } = {}) {
   if (!force && Date.now() - lastScoreSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (scoreSyncPromise) return scoreSyncPromise;
 
-  scoreSyncPromise = (useSportmonksProvider() ? runSportmonksSync('scores', { force }) : useApiSportsProvider() ? syncApiSportsScores() : syncTheOddsApiScores())
-    .finally(() => {
-      lastScoreSyncAt = Date.now();
-      scoreSyncPromise = null;
+  scoreSyncPromise = (async () => {
+    const tasks = [];
+
+    // Odds should still come from The Odds API, but scores/status should be merged from
+    // official score providers. Running these in one cycle keeps home cards and details in sync.
+    if (theOddsApiKey()) {
+      tasks.push({ provider: 'theoddsapi', run: () => syncTheOddsApiScores() });
+    }
+
+    if (sportmonksCricketConfigured() && bool(process.env.SPORTMONKS_CRICKET_ENABLED, true)) {
+      tasks.push({ provider: 'sportmonks-cricket', run: () => syncSportmonksCricketScores({ force }) });
+    }
+
+    if (sportmonksFootballConfigured() && bool(process.env.SPORTMONKS_FOOTBALL_ENABLED, false)) {
+      tasks.push({ provider: 'sportmonks-football', run: () => syncSportmonksFootballScores({ force }) });
+    }
+
+    if (apiSportsOddsProviderConfigured()) {
+      tasks.push({ provider: 'apisports', run: () => syncApiSportsScores() });
+    }
+
+    if (!tasks.length) {
+      return { skipped: true, reason: 'No sports score provider configured' };
+    }
+
+    const settled = await Promise.allSettled(tasks.map(async (task) => ({
+      provider: task.provider,
+      value: await task.run(),
+    })));
+
+    const providers = {};
+    let events = 0;
+    let finished = 0;
+    const skippedSports = [];
+    const errors = [];
+
+    settled.forEach((result, index) => {
+      const provider = tasks[index]?.provider || `provider_${index}`;
+      if (result.status === 'rejected') {
+        errors.push({ provider, message: result.reason?.message || String(result.reason) });
+        providers[provider] = { failed: true, message: result.reason?.message || String(result.reason) };
+        return;
+      }
+
+      const value = result.value?.value || result.value || {};
+      providers[provider] = value;
+      events += Number(value.events || value.updated || value.checked || 0);
+      finished += Number(value.finished || 0);
+      if (Array.isArray(value.skippedSports)) skippedSports.push(...value.skippedSports.map((item) => ({ ...item, provider })));
+      if (Array.isArray(value.errors)) errors.push(...value.errors.map((item) => ({ ...item, provider })));
     });
+
+    let officialMerge = { skipped: true, reason: 'official merge disabled' };
+    try {
+      officialMerge = await mergeOfficialScoresIntoOddsEvents({ force });
+      events += Number(officialMerge.updated || 0);
+    } catch (error) {
+      errors.push({ provider: 'official-merge', message: error?.message || String(error) });
+      officialMerge = { failed: true, message: error?.message || String(error) };
+    }
+
+    return {
+      mode: 'multi_official_realtime_scores',
+      providers,
+      officialMerge,
+      events,
+      finished,
+      skippedSports,
+      errors,
+    };
+  })().finally(() => {
+    lastScoreSyncAt = Date.now();
+    scoreSyncPromise = null;
+  });
 
   return scoreSyncPromise;
 }
