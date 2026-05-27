@@ -28,6 +28,8 @@ const sportsAutoEventSchema = new mongoose.Schema({
     index: true,
   },
   scores: { type: [scoreSideSchema], default: [] },
+  score: { type: mongoose.Schema.Types.Mixed, default: {} },
+  scoreSource: { type: String, default: '' },
   completed: { type: Boolean, default: false, index: true },
   lastProviderUpdate: Date,
   lastScoreUpdate: Date,
