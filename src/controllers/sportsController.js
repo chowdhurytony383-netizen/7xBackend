@@ -14,6 +14,7 @@ import { getSportsMatchDetails, sportsDetailsConfigured } from '../services/spor
 import { apiSportsOddsProviderConfigured } from '../services/apiSportsOddsProviderService.js';
 import { sportmonksCricketConfigured } from '../services/sportmonksCricketService.js';
 import { sportmonksFootballConfigured } from '../services/sportmonksFootballService.js';
+import { refreshEventScoresFromDetails } from '../services/sportsRealtimeMergeService.js';
 
 let backgroundSportsSyncPromise = null;
 let liveMatchesCache = { createdAt: 0, payload: null };
@@ -455,9 +456,11 @@ function strictDisplayStatus(event = {}) {
   const rawStatus = String(event.status || '').trim().toUpperCase();
   if (event.completed || ['FINISHED', 'COMPLETE', 'COMPLETED', 'CLOSED', 'CANCELLED', 'CANCELED'].includes(rawStatus)) return 'Finished';
 
-  // Never show LIVE from start time or odds-only data.
-  // LIVE is allowed only when real score progress exists (score > 0, goals/runs/points, or cricket overs > 0).
-  if (rawStatus === 'LIVE' && eventHasRealScoreProgress(event)) return 'Live';
+  // Show LIVE whenever an official provider has supplied real score progress.
+  // This fixes stale UPCOMING rows that already have SportMonks/API-SPORTS live scores.
+  if (eventHasRealScoreProgress(event)) return 'Live';
+
+  if (rawStatus === 'LIVE') return 'Live';
 
   return 'Upcoming';
 }
@@ -607,8 +610,18 @@ async function formatAutoEvents(events = []) {
   return events.map((event) => formatAutoEventFromMarket(event, latestMarketByEvent.get(String(event._id))));
 }
 
-function maybeAutoSync() {
-  triggerBackgroundSportsSync();
+async function maybeAutoSync({ wait = false } = {}) {
+  const promise = triggerBackgroundSportsSync();
+  if (!wait || !promise) return promise;
+
+  const timeoutMs = Math.max(250, Number(process.env.SPORTS_AUTO_SYNC_BLOCKING_MS || 2500));
+  await Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+
+  invalidateSportsResponseCaches();
+  return promise;
 }
 
 function mergeCategoryWithMeta(category) {
@@ -682,7 +695,7 @@ export const categories = asyncHandler(async (_req, res) => {
 });
 
 export const liveMatches = asyncHandler(async (req, res) => {
-  maybeAutoSync();
+  await maybeAutoSync({ wait: boolEnv('SPORTS_AUTO_SYNC_ON_REQUEST_BLOCKING', true) });
 
   const ttl = cacheTtlMs('SPORTS_RESPONSE_CACHE_SECONDS', 6);
   const sportQuery = String(req.query?.sport || req.query?.category || req.query?.categoryKey || '').trim().toLowerCase();
@@ -785,7 +798,12 @@ export const eventDetails = asyncHandler(async (req, res) => {
     getSportsMatchDetails(event),
   ]);
 
-  const formattedEvent = formatAutoEventFromMarket(event, market);
+  const refreshedEvent = await refreshEventScoresFromDetails(event, details);
+  if (refreshedEvent && String(refreshedEvent._id || '') === String(event._id || '')) {
+    invalidateSportsResponseCaches();
+  }
+
+  const formattedEvent = formatAutoEventFromMarket(refreshedEvent || event, market);
   res.json({
     success: true,
     data: { event: formattedEvent, market, details },
