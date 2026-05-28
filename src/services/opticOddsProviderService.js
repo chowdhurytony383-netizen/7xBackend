@@ -841,7 +841,23 @@ function configuredSports() {
 }
 
 function configuredMarkets() {
-  return csv(process.env.OPTICODDS_DEFAULT_MARKETS || process.env.SPORTS_DEFAULT_MARKETS || 'moneyline', ['moneyline'])
+  // OpticOdds often has cricket/soccer odds under sport-specific markets
+  // rather than a universal moneyline market. Set OPTICODDS_DEFAULT_MARKETS=all
+  // or leave it blank to send NO market filter and ingest all main lines.
+  const configured = Object.prototype.hasOwnProperty.call(process.env, 'OPTICODDS_DEFAULT_MARKETS')
+    ? process.env.OPTICODDS_DEFAULT_MARKETS
+    : (Object.prototype.hasOwnProperty.call(process.env, 'SPORTS_DEFAULT_MARKETS')
+      ? process.env.SPORTS_DEFAULT_MARKETS
+      : 'moneyline');
+
+  const markets = csv(configured, []);
+  if (!markets.length) return [];
+
+  if (markets.some((market) => ['all', '*', 'any', 'none', 'no_filter', 'nofilter'].includes(String(market || '').trim().toLowerCase()))) {
+    return [];
+  }
+
+  return markets
     .map((market) => {
       const key = String(market || '').trim().toLowerCase();
       if (['h2h', 'match_winner', 'winner', 'head_to_head'].includes(key)) return 'moneyline';
