@@ -650,7 +650,30 @@ function rowsFromNestedOdds(source = {}) {
 
 function rowsFromFlatOdds(source = {}) {
   const rows = [];
-  const candidates = [source, ...dataArray(source), ...arrayFrom(source.data?.odds, source.fixture_odds, source.lines, source.selections)];
+  const dataRows = dataArray(source);
+  const nestedOdds = [];
+
+  // OpticOdds v3 /fixtures/odds returns:
+  // { data: [{ fixture fields..., odds: [{ sportsbook, market, market_id, name, price, ... }] }] }
+  // The previous parser looked at data[] but did not descend into each fixture's odds[] array,
+  // so fixtures synced while markets stayed at 0 even when odds existed.
+  dataRows.forEach((row) => {
+    nestedOdds.push(...arrayFrom(
+      row?.odds,
+      row?.fixture_odds,
+      row?.lines,
+      row?.selections,
+      row?.markets,
+      row?.data?.odds
+    ));
+  });
+
+  const candidates = [
+    source,
+    ...dataRows,
+    ...nestedOdds,
+    ...arrayFrom(source.data?.odds, source.fixture_odds, source.lines, source.selections, source.markets),
+  ];
 
   candidates.forEach((item) => {
     if (!item || typeof item !== 'object') return;
