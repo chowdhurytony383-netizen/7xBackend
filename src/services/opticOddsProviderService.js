@@ -734,12 +734,23 @@ function groupMarketRows(rows = [], providerEventId = '') {
     const nextRank = bookmakerRank(row.sportsbook);
     const currentRank = bookmakerRank(current?.sportsbook || '');
 
-    if (!current || nextRank < currentRank || (nextRank === currentRank && current.rows.length < 2)) {
+    // First row for this market.
+    if (!current) {
       marketMap.set(marketKey, { sportsbook: row.sportsbook, marketName: row.marketName || row.marketDisplayName, rows: [row], rank: nextRank });
       return;
     }
 
-    if (current.sportsbook === row.sportsbook || current.rank === nextRank) {
+    // If a more preferred sportsbook is found, replace the market group with that book.
+    // Example: 1XBet rank 0 should replace a later/fallback book rank 999.
+    if (nextRank < currentRank) {
+      marketMap.set(marketKey, { sportsbook: row.sportsbook, marketName: row.marketName || row.marketDisplayName, rows: [row], rank: nextRank });
+      return;
+    }
+
+    // Same sportsbook/rank: append selections. The previous code reset the group while
+    // current.rows.length < 2, so every market stayed at one selection and was later
+    // filtered out, producing markets: 0 even when OpticOdds returned many odds.
+    if (nextRank === currentRank || String(current.sportsbook || '').toLowerCase() === String(row.sportsbook || '').toLowerCase()) {
       current.rows.push(row);
     }
   });
