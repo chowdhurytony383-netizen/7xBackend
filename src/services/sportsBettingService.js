@@ -10,11 +10,18 @@ import SportsSyncLog from '../models/SportsSyncLog.js';
 import { AppError } from '../utils/appError.js';
 import { debitWallet, creditWallet } from '../utils/wallet.js';
 import { assertUserCanPlay } from '../utils/userPermissions.js';
+import { gradeOpticOddsBet, shouldUseOpticOddsGrader } from './opticOddsGraderService.js';
 
 const makeBetId = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 12);
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function boolEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === '') return fallback;
+  return String(value).toLowerCase() === 'true';
 }
 
 function normalizeName(value = '') {
@@ -29,14 +36,22 @@ function normalizeName(value = '') {
     .trim();
 }
 
-function boolEnv(name, fallback = false) {
-  const value = process.env[name];
-  if (value === undefined || value === null || value === '') return fallback;
-  return String(value).toLowerCase() === 'true';
-}
-
 function stableId(...parts) {
   return crypto.createHash('sha1').update(parts.filter(Boolean).join('|')).digest('hex').slice(0, 24);
+}
+
+function eventStarted(event = {}) {
+  if (!event?.commenceTime) return false;
+  const start = new Date(event.commenceTime).getTime();
+  return Number.isFinite(start) && start <= Date.now();
+}
+
+function bettingCloseTooLate(event = {}) {
+  const closeSeconds = Number(process.env.SPORTS_BET_CLOSE_BEFORE_START_SECONDS || 0);
+  if (!event?.commenceTime || closeSeconds <= 0) return false;
+  const start = new Date(event.commenceTime).getTime();
+  if (!Number.isFinite(start)) return false;
+  return Date.now() >= start - closeSeconds * 1000;
 }
 
 function syntheticDrawSelectionId(event, marketKey = 'h2h') {
@@ -124,6 +139,12 @@ export async function placeSportsBet({ user, eventId, marketKey = 'h2h', selecti
   const event = await SportsAutoEvent.findOne({ _id: eventId, isActive: true });
   if (!event) throw new AppError('Sports event not found', 404);
   if (event.completed || event.status === 'FINISHED') throw new AppError('This event is already finished', 400);
+  if (!boolEnv('SPORTS_LIVE_BETTING_ENABLED', true) && eventStarted(event)) {
+    throw new AppError('Live betting is not enabled for this event', 400);
+  }
+  if (bettingCloseTooLate(event) && event.status !== 'LIVE') {
+    throw new AppError('Betting is closed for this event', 400);
+  }
 
   const market = await SportsAutoMarket.findOne({ event: event._id, marketKey, status: 'OPEN' });
   if (!market) throw new AppError('Market is not available', 404);
@@ -137,6 +158,9 @@ export async function placeSportsBet({ user, eventId, marketKey = 'h2h', selecti
   let selection = market.selections.find((item) => item.selectionId === selectionId && item.status === 'OPEN');
 
   if (!selection && canUseSyntheticDraw(event, marketKey, selectionId)) {
+    if (boolEnv('SPORTS_REQUIRE_REAL_ODDS', true) || boolEnv('SPORTS_DISABLE_SYNTHETIC_ODDS', true)) {
+      throw new AppError('Only real provider odds are accepted', 400);
+    }
     selection = {
       selectionId: syntheticDrawSelectionId(event, marketKey),
       name: 'Draw',
@@ -149,6 +173,10 @@ export async function placeSportsBet({ user, eventId, marketKey = 'h2h', selecti
 
   const odds = Number(selection.price);
   if (!Number.isFinite(odds) || odds <= 1) throw new AppError('Invalid odds', 400);
+
+  if (boolEnv('SPORTS_REQUIRE_REAL_ODDS', true) && !selection.selectionId) {
+    throw new AppError('Provider odds are not ready yet', 409);
+  }
 
   const walletBefore = Number(user.wallet || 0);
   const updatedUser = await debitWallet(user._id, amount, `sports-bet:${event.providerEventId}`);
@@ -167,9 +195,26 @@ export async function placeSportsBet({ user, eventId, marketKey = 'h2h', selecti
     awayTeam: event.awayTeam,
     marketKey: market.marketKey,
     marketName: market.marketName,
+    marketDisplayName: market.marketDisplayName || market.marketName,
+    sportsbook: selection.sportsbook || market.bookmaker || '',
+    providerOddsId: selection.providerOddsId || '',
+    groupingKey: selection.groupingKey || '',
     selectionId: selection.selectionId,
     selectionName: selection.name,
+    selectionDisplayName: selection.displayName || selection.name,
+    point: selection.point ?? null,
     odds,
+    oddsLockedAt: new Date(),
+    providerSnapshot: {
+      market: {
+        marketKey: market.marketKey,
+        marketName: market.marketName,
+        marketDisplayName: market.marketDisplayName || market.marketName,
+        bookmaker: market.bookmaker,
+        lastProviderUpdate: market.lastProviderUpdate,
+      },
+      selection,
+    },
     stake: amount,
     potentialReturn: roundMoney(amount * odds),
     status: 'OPEN',
@@ -182,6 +227,53 @@ export async function placeSportsBet({ user, eventId, marketKey = 'h2h', selecti
 
 async function settleOneBet(bet, event) {
   if (!event.completed) return { settled: false, reason: 'event not completed' };
+
+  if (shouldUseOpticOddsGrader(bet.provider)) {
+    const graded = await gradeOpticOddsBet(bet);
+    if (graded.status === 'PENDING') return { settled: false, reason: graded.reason || 'grader pending' };
+    if (graded.status === 'UNSUPPORTED' || graded.status === 'UNKNOWN') return { settled: false, reason: graded.reason || 'grader unsupported' };
+
+    const result = {
+      provider: 'opticodds',
+      providerResult: graded.providerResult,
+      status: graded.status,
+      raw: graded.raw,
+      eventStatus: event.status,
+    };
+
+    let payout = 0;
+    let nextStatus = graded.status;
+
+    if (graded.status === 'WON') payout = roundMoney(bet.potentialReturn);
+    if (graded.status === 'REFUNDED') payout = roundMoney(bet.stake);
+    if (graded.status === 'HALF_WON') payout = roundMoney(bet.stake + ((bet.potentialReturn - bet.stake) / 2));
+    if (graded.status === 'HALF_LOST') payout = roundMoney(bet.stake / 2);
+
+    const reviewAbove = Number(env.SPORTS_AUTO_REVIEW_ABOVE_AMOUNT || 0);
+    if (payout > 0 && reviewAbove > 0 && payout > reviewAbove) {
+      bet.status = 'REVIEW';
+      bet.result = result;
+      bet.settlementReason = `OpticOdds graded ${graded.status}; payout ${payout} is above review limit ${reviewAbove}`;
+      bet.settledAt = new Date();
+      await bet.save();
+      return { settled: true, status: 'REVIEW', payout: 0 };
+    }
+
+    if (payout > 0) {
+      await creditWallet(bet.user, payout, `sports-settlement:${bet.betId}`);
+    }
+
+    if (graded.status === 'REFUNDED') nextStatus = 'REFUNDED';
+    bet.status = nextStatus;
+    bet.payoutAmount = payout;
+    bet.result = result;
+    bet.settlementReason = `Settled by OpticOdds grader: ${graded.providerResult || graded.status}`;
+    bet.settledAt = new Date();
+    bet.settledBy = 'opticodds-grader';
+    await bet.save();
+
+    return { settled: true, status: bet.status, payout };
+  }
 
   let winningSelection = null;
   if (bet.marketKey === 'h2h') {

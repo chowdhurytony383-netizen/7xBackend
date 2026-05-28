@@ -10,8 +10,8 @@ const DEFAULT_BASE_URL = 'https://api.opticodds.com/api/v3';
 const DEFAULT_ACTIVE_PATHS = ['/fixtures/active', '/fixtures-active'];
 const DEFAULT_ODDS_PATHS = ['/fixtures/odds'];
 const DEFAULT_RESULTS_PATHS = ['/fixtures/results'];
-const DEFAULT_ODDS_STREAM_PATHS = ['/stream/odds/{sport}'];
-const DEFAULT_RESULTS_STREAM_PATHS = ['/stream/results/{sport}'];
+const DEFAULT_ODDS_STREAM_PATHS = ['/stream/odds/{sport}', '/stream-odds/{sport}', '/stream-odds'];
+const DEFAULT_RESULTS_STREAM_PATHS = ['/stream/results/{sport}', '/stream-results/{sport}', '/stream-results'];
 
 let cachedSuccessfulActivePath = '';
 let cachedSuccessfulOddsPath = '';
@@ -92,8 +92,8 @@ async function fetchOpticJson(path, params = {}, sport = '') {
     const response = await fetch(makeUrl(path, params, sport), {
       headers: {
         Accept: 'application/json',
+        'X-Api-Key': key,
         'x-api-key': key,
-        Authorization: `Bearer ${key}`,
       },
       signal: controller.signal,
     });
@@ -176,8 +176,8 @@ async function fetchOpticStreamSnapshot(path, params = {}, sport = '') {
   const response = await fetch(makeUrl(path, params, sport), {
     headers: {
       Accept: 'text/event-stream, application/json',
+      'X-Api-Key': key,
       'x-api-key': key,
-      Authorization: `Bearer ${key}`,
     },
   });
 
@@ -473,8 +473,38 @@ function normalizeMarketKey(value = '') {
 }
 
 function marketNameFor(key = '') {
-  const names = { h2h: 'Match Winner', spreads: 'Handicap', totals: 'Over / Under' };
+  const names = { h2h: 'Moneyline', spreads: 'Point Spread', totals: 'Total' };
   return names[key] || titleCase(key);
+}
+
+function marketDisplayNameFrom(...values) {
+  const label = firstString(...values);
+  if (!label) return '';
+  const clean = label.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/^h2h$/i.test(clean)) return 'Moneyline';
+  if (/^1x2$/i.test(clean)) return '1X2';
+  if (/^moneyline$/i.test(clean)) return 'Moneyline';
+  return clean.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function providerOddsIdFrom(item = {}) {
+  return firstString(
+    item.id,
+    item.odds_id,
+    item.odd_id,
+    item.price_id,
+    item.selection_id,
+    item.line_id,
+    item.uuid,
+    item.key
+  );
+}
+
+function displaySelectionName(name = '', point = null) {
+  const base = String(name || '').trim();
+  if (point === undefined || point === null || point === '') return base;
+  if (/\b(over|under)\b/i.test(base) && !String(base).includes(String(point))) return `${base} ${point}`;
+  return base;
 }
 
 function preferredSportsbooks() {
@@ -501,17 +531,27 @@ function rowsFromNestedOdds(source = {}) {
     const bookKey = firstString(book.key, book.id, book.name, book.title, book.sportsbook);
     const markets = arrayFrom(book.markets, book.odds, book.lines);
     markets.forEach((market) => {
-      const marketKey = normalizeMarketKey(firstString(market.key, market.market, market.name, market.market_name, market.type));
+      const rawMarketName = firstString(market.market, market.market_name, market.name, market.label, market.type, market.key);
+      const marketKey = normalizeMarketKey(rawMarketName);
+      const marketDisplayName = marketDisplayNameFrom(rawMarketName) || marketNameFor(marketKey);
       const outcomes = arrayFrom(market.outcomes, market.selections, market.prices, market.odds);
       outcomes.forEach((outcome) => {
+        const point = outcome.point ?? outcome.handicap ?? outcome.total ?? null;
+        const selectionName = firstString(outcome.name, outcome.selection, outcome.label, outcome.team, outcome.participant, outcome.description);
         rows.push({
           sportsbook: bookKey,
           marketKey,
-          marketName: marketNameFor(marketKey),
-          selectionName: firstString(outcome.name, outcome.selection, outcome.label, outcome.team, outcome.participant, outcome.description),
+          marketName: marketDisplayName,
+          marketDisplayName,
+          selectionName,
+          selectionDisplayName: displaySelectionName(selectionName, point),
+          providerOddsId: providerOddsIdFrom(outcome),
+          lineId: firstString(outcome.line_id, outcome.lineId, market.line_id, market.lineId),
+          groupingKey: firstString(outcome.grouping_key, outcome.groupingKey, market.grouping_key, market.groupingKey),
           price: outcome.price ?? outcome.odds ?? outcome.value ?? outcome.decimal ?? outcome.decimal_odds,
-          point: outcome.point ?? outcome.handicap ?? outcome.total ?? null,
-          status: firstString(outcome.status, market.status, book.status, 'OPEN'),
+          point,
+          isMain: outcome.is_main ?? market.is_main ?? true,
+          status: firstString(outcome.status, outcome.status_display, market.status, book.status, 'OPEN'),
           raw: { book, market, outcome },
         });
       });
@@ -531,14 +571,25 @@ function rowsFromFlatOdds(source = {}) {
     const selectionName = firstString(item.selection, item.selection_name, item.selectionName, item.name, item.outcome, item.team, item.participant, item.participant_name, item.label);
     if (!selectionName || Number(price || 0) <= 1) return;
 
+    const rawMarketName = firstString(item.market, item.market_name, item.marketName, item.market_key, item.marketKey, item.type);
+    const marketKey = normalizeMarketKey(rawMarketName);
+    const point = item.point ?? item.handicap ?? item.total ?? null;
+    const sportsbook = firstString(item.sportsbook, item.sportsbook_id, item.bookmaker, item.book, item.sportsbook_key, item.bookmaker_key);
+
     rows.push({
-      sportsbook: firstString(item.sportsbook, item.sportsbook_id, item.bookmaker, item.book, item.sportsbook_key, item.bookmaker_key),
-      marketKey: normalizeMarketKey(firstString(item.market, item.market_key, item.marketKey, item.market_name, item.name)),
-      marketName: marketNameFor(normalizeMarketKey(firstString(item.market, item.market_key, item.marketKey, item.market_name, item.name))),
+      sportsbook,
+      marketKey,
+      marketName: marketDisplayNameFrom(rawMarketName) || marketNameFor(marketKey),
+      marketDisplayName: marketDisplayNameFrom(rawMarketName) || marketNameFor(marketKey),
       selectionName,
+      selectionDisplayName: displaySelectionName(selectionName, point),
+      providerOddsId: providerOddsIdFrom(item),
+      lineId: firstString(item.line_id, item.lineId),
+      groupingKey: firstString(item.grouping_key, item.groupingKey),
       price,
-      point: item.point ?? item.handicap ?? item.total ?? null,
-      status: firstString(item.status, 'OPEN'),
+      point,
+      isMain: item.is_main ?? true,
+      status: firstString(item.status, item.status_display, 'OPEN'),
       raw: item,
     });
   });
@@ -560,7 +611,7 @@ function extractOddsRows(payloads = [], fixture = {}) {
     .map((row) => ({
       ...row,
       sportsbook: row.sportsbook || 'OpticOdds',
-      status: /suspend|close|lock|offline/i.test(String(row.status || '')) ? 'SUSPENDED' : 'OPEN',
+      status: /suspend|close|lock|offline|hidden|inactive/i.test(String(row.status || '')) ? 'SUSPENDED' : 'OPEN',
     }));
 }
 
@@ -574,7 +625,7 @@ function groupMarketRows(rows = [], providerEventId = '') {
     const currentRank = bookmakerRank(current?.sportsbook || '');
 
     if (!current || nextRank < currentRank || (nextRank === currentRank && current.rows.length < 2)) {
-      marketMap.set(marketKey, { sportsbook: row.sportsbook, rows: [row], rank: nextRank });
+      marketMap.set(marketKey, { sportsbook: row.sportsbook, marketName: row.marketName || row.marketDisplayName, rows: [row], rank: nextRank });
       return;
     }
 
@@ -586,16 +637,25 @@ function groupMarketRows(rows = [], providerEventId = '') {
   return Array.from(marketMap.entries())
     .map(([marketKey, group]) => ({
       marketKey,
-      marketName: marketNameFor(marketKey),
+      marketName: group.marketName || marketNameFor(marketKey),
+      marketDisplayName: group.marketName || marketNameFor(marketKey),
       bookmaker: group.sportsbook,
       selections: group.rows
         .map((row) => ({
           selectionId: normalizeSelectionId(providerEventId, marketKey, row.selectionName, row.point),
+          providerOddsId: row.providerOddsId || '',
+          sportsbook: row.sportsbook || group.sportsbook || '',
+          lineId: row.lineId || '',
+          groupingKey: row.groupingKey || '',
           name: row.selectionName,
+          displayName: row.selectionDisplayName || row.selectionName,
           price: numberFrom(row.price, 0),
           lastPrice: numberFrom(row.price, 0),
           point: row.point ?? null,
+          isMain: row.isMain !== false,
           status: row.status === 'OPEN' && numberFrom(row.price, 0) > 1 ? 'OPEN' : 'SUSPENDED',
+          lastLockedAt: row.status === 'OPEN' ? undefined : new Date(),
+          raw: row.raw || {},
         }))
         .filter((selection) => selection.name && selection.price > 1),
       raw: group.rows.map((row) => row.raw),
@@ -651,6 +711,7 @@ async function upsertOpticMarkets(event, fixture = {}, payloads = []) {
           providerEventId: event.providerEventId,
           marketKey: market.marketKey,
           marketName: market.marketName,
+          marketDisplayName: market.marketDisplayName || market.marketName,
           bookmaker: market.bookmaker,
           selections: market.selections,
           status: market.selections.some((selection) => selection.status === 'OPEN') ? 'OPEN' : 'SUSPENDED',
@@ -667,9 +728,29 @@ async function upsertOpticMarkets(event, fixture = {}, payloads = []) {
 }
 
 function configuredSports() {
-  return csv(process.env.OPTICODDS_DEFAULT_SPORTS || process.env.OPTICODDS_SPORTS || process.env.SPORTS_AUTO_SPORT_KEYS || 'cricket,soccer', ['cricket', 'soccer'])
-    .map((item) => item.toLowerCase())
-    .filter((item) => !['all', 'active', '*'].includes(item));
+  const defaultSports = [
+    'cricket',
+    'soccer',
+    'basketball',
+    'tennis',
+    'baseball',
+    'hockey',
+    'football',
+    'rugby',
+    'volleyball',
+    'mma',
+    'boxing',
+    'table_tennis',
+    'darts',
+    'esports',
+  ];
+  const requested = csv(
+    process.env.OPTICODDS_DEFAULT_SPORTS || process.env.OPTICODDS_SPORTS || process.env.SPORTS_AUTO_SPORT_KEYS || 'cricket,soccer',
+    ['cricket', 'soccer']
+  ).map((item) => item.toLowerCase());
+
+  if (requested.some((item) => ['all', 'active', '*'].includes(item))) return defaultSports;
+  return requested.filter(Boolean);
 }
 
 function configuredMarkets() {
@@ -690,7 +771,7 @@ function oddsSnapshotParams(fixture = {}, sport = '') {
     sportsbook: preferredSportsbooks(),
     market: configuredMarkets(),
     is_main: 'true',
-    odds_format: 'decimal',
+    odds_format: 'DECIMAL',
   };
 }
 
@@ -709,7 +790,7 @@ function streamParams(fixture = {}, sport = '') {
     sportsbook: preferredSportsbooks(),
     market: configuredMarkets(),
     is_main: 'true',
-    odds_format: 'decimal',
+    odds_format: 'DECIMAL',
   };
 }
 
