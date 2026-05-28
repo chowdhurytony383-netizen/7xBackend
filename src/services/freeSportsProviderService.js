@@ -8,6 +8,7 @@ import { apiSportsOddsProviderConfigured, clearApiSportsStaleEvents, syncApiSpor
 import { clearSportmonksCricketStaleEvents, getSportmonksCricketMatchDetails, sportmonksCricketConfigured, syncSportmonksCricketOdds, syncSportmonksCricketScores } from './sportmonksCricketService.js';
 import { clearSportmonksFootballStaleEvents, sportmonksFootballConfigured, syncSportmonksFootballOdds, syncSportmonksFootballScores } from './sportmonksFootballService.js';
 import { mergeOfficialScoresIntoOddsEvents } from './sportsRealtimeMergeService.js';
+import { clearOpticOddsStaleEvents, opticOddsProviderConfigured, syncOpticOddsOdds, syncOpticOddsScores } from './opticOddsProviderService.js';
 
 const THE_ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const DEFAULT_SPORT_KEYS = [
@@ -874,6 +875,7 @@ function normalizeProviderName(value = '') {
   if (!provider) return 'theoddsapi';
   if (['lowcost', 'low-cost', 'cheap', 'hybrid', 'multi', 'all', 'the-odds-api', 'the_odds_api', 'oddsapi', 'theodds'].includes(provider)) return 'theoddsapi';
   if (['api-sports', 'api_sports', 'apisports'].includes(provider)) return 'apisports';
+  if (['opticodds', 'optic-odds', 'optic_odds'].includes(provider)) return 'opticodds';
   if (['sportmonkscricket', 'sportmonks-cricket', 'sportmonks_cricket'].includes(provider)) return 'sportmonks-cricket';
   if (['sportmonksfootball', 'sportmonks-football', 'sportmonks_football'].includes(provider)) return 'sportmonks-football';
   return provider;
@@ -891,6 +893,11 @@ function currentSportsProvider() {
 function useApiSportsProvider() {
   const provider = currentSportsProvider();
   return provider === 'apisports' || provider === 'api-sports' || provider === 'api_sports';
+}
+
+function useOpticOddsProvider() {
+  const provider = currentSportsProvider();
+  return provider === 'opticodds' || provider === 'optic-odds' || provider === 'optic_odds';
 }
 
 function useSportmonksProvider() {
@@ -996,7 +1003,7 @@ export async function syncSportsOdds({ force = false } = {}) {
   if (!force && Date.now() - lastOddsSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (oddsSyncPromise) return oddsSyncPromise;
 
-  oddsSyncPromise = (useSportmonksProvider() ? runSportmonksSync('odds', { force }) : useApiSportsProvider() ? syncApiSportsOdds() : syncTheOddsApiOdds())
+  oddsSyncPromise = (useSportmonksProvider() ? runSportmonksSync('odds', { force }) : useOpticOddsProvider() ? syncOpticOddsOdds({ force }) : useApiSportsProvider() ? syncApiSportsOdds() : syncTheOddsApiOdds())
     .finally(() => {
       lastOddsSyncAt = Date.now();
       oddsSyncPromise = null;
@@ -1015,7 +1022,11 @@ export async function syncSportsScores({ force = false } = {}) {
 
     // Odds should still come from The Odds API, but scores/status should be merged from
     // official score providers. Running these in one cycle keeps home cards and details in sync.
-    if (theOddsApiKey()) {
+    if (useOpticOddsProvider() && opticOddsProviderConfigured()) {
+      tasks.push({ provider: 'opticodds', run: () => syncOpticOddsScores({ force }) });
+    }
+
+    if (!useOpticOddsProvider() && theOddsApiKey()) {
       tasks.push({ provider: 'theoddsapi', run: () => syncTheOddsApiScores() });
     }
 
@@ -1090,6 +1101,7 @@ export async function syncSportsScores({ force = false } = {}) {
 
 export async function clearStaleSportsEvents() {
   if (useSportmonksProvider()) return clearSportmonksStaleEvents();
+  if (useOpticOddsProvider()) return clearOpticOddsStaleEvents();
   return useApiSportsProvider() ? clearApiSportsStaleEvents() : deactivateStaleSportsEvents('theoddsapi');
 }
 
