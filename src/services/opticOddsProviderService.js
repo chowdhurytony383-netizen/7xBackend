@@ -6,6 +6,7 @@ import SportsAutoMarket from '../models/SportsAutoMarket.js';
 import SportsSyncLog from '../models/SportsSyncLog.js';
 
 const PROVIDER = 'opticodds';
+const ALL_SPORTS_TOKEN = '__opticodds_all_sports__';
 const DEFAULT_BASE_URL = 'https://api.opticodds.com/api/v3';
 const DEFAULT_ACTIVE_PATHS = ['/fixtures/active', '/fixtures-active'];
 const DEFAULT_ODDS_PATHS = ['/stream-odds', '/stream/{sport}/odds'];
@@ -661,9 +662,30 @@ async function upsertOpticMarkets(event, fixture = {}, payloads = []) {
 }
 
 function configuredSports() {
-  return csv(process.env.OPTICODDS_DEFAULT_SPORTS || process.env.OPTICODDS_SPORTS || process.env.SPORTS_AUTO_SPORT_KEYS || 'cricket,soccer', ['cricket', 'soccer'])
+  const configuredValue = process.env.OPTICODDS_DEFAULT_SPORTS
+    || process.env.OPTICODDS_SPORTS
+    || process.env.SPORTS_AUTO_SPORT_KEYS
+    || 'cricket,soccer';
+
+  const sports = csv(configuredValue, ['cricket', 'soccer'])
     .map((item) => item.toLowerCase())
-    .filter((item) => !['all', 'active', '*'].includes(item));
+    .filter(Boolean);
+
+  if (sports.some((item) => ['all', 'active', '*', 'all_sports', 'allsports'].includes(item))) {
+    return [ALL_SPORTS_TOKEN];
+  }
+
+  return sports;
+}
+
+function isAllSportsMode(sport = '') {
+  return sport === ALL_SPORTS_TOKEN;
+}
+
+function sportForFixture(fixture = {}, configuredSport = '') {
+  const detected = sportFrom(fixture, '');
+  if (detected && detected !== 'sports') return detected;
+  return isAllSportsMode(configuredSport) ? '' : configuredSport;
 }
 
 function activeFixtureParams(sport = '') {
@@ -697,8 +719,9 @@ function fixtureLimit() {
 }
 
 async function fetchActiveFixturesForSport(sport = '') {
+  const actualSport = isAllSportsMode(sport) ? '' : sport;
   const paths = csv(process.env.OPTICODDS_ACTIVE_FIXTURES_PATH || '', DEFAULT_ACTIVE_PATHS);
-  const result = await fetchFirstWorkingJson(paths, activeFixtureParams(sport), sport, cachedSuccessfulActivePath);
+  const result = await fetchFirstWorkingJson(paths, activeFixtureParams(actualSport), actualSport, cachedSuccessfulActivePath);
   cachedSuccessfulActivePath = result.path;
   return dataArray(result.payload);
 }
@@ -778,12 +801,13 @@ export async function syncOpticOddsOdds({ force = false } = {}) {
     try {
       const fixtures = (await fetchActiveFixturesForSport(sport)).slice(0, fixtureLimit());
       for (const fixture of fixtures) {
-        const event = await upsertOpticEvent({ ...fixture, sport });
+        const fixtureSport = sportForFixture(fixture, sport);
+        const event = await upsertOpticEvent({ ...fixture, sport: fixtureSport || sport });
         let streamPayloads = [];
         try {
-          streamPayloads = await fetchOddsPayloadsForFixture(fixture, sport);
+          streamPayloads = await fetchOddsPayloadsForFixture(fixture, fixtureSport);
         } catch (error) {
-          stats.errors.push({ sport, fixtureId: event.providerEventId, type: 'odds-stream', message: error?.message || String(error), status: error?.status || null });
+          stats.errors.push({ sport: fixtureSport || sport, fixtureId: event.providerEventId, type: 'odds-stream', message: error?.message || String(error), status: error?.status || null });
         }
 
         const marketCount = await upsertOpticMarkets(event, fixture, streamPayloads);
@@ -791,7 +815,7 @@ export async function syncOpticOddsOdds({ force = false } = {}) {
         stats.markets += marketCount;
       }
     } catch (error) {
-      stats.skippedSports.push({ sportKey: sport, message: error?.message || String(error), status: error?.status || null });
+      stats.skippedSports.push({ sportKey: isAllSportsMode(sport) ? 'all' : sport, message: error?.message || String(error), status: error?.status || null });
     }
   }
 
@@ -821,21 +845,22 @@ export async function syncOpticOddsScores({ force = false } = {}) {
     try {
       const fixtures = (await fetchActiveFixturesForSport(sport)).slice(0, fixtureLimit());
       for (const fixture of fixtures) {
+        const fixtureSport = sportForFixture(fixture, sport);
         let resultPayloads = [];
         try {
-          resultPayloads = await fetchResultsPayloadsForFixture(fixture, sport);
+          resultPayloads = await fetchResultsPayloadsForFixture(fixture, fixtureSport);
         } catch (error) {
-          stats.errors.push({ sport, fixtureId: eventIdFrom(fixture), type: 'results-stream', message: error?.message || String(error), status: error?.status || null });
+          stats.errors.push({ sport: fixtureSport || sport, fixtureId: eventIdFrom(fixture), type: 'results-stream', message: error?.message || String(error), status: error?.status || null });
         }
 
-        const merged = mergeResultPayloadIntoFixture({ ...fixture, sport }, resultPayloads);
+        const merged = mergeResultPayloadIntoFixture({ ...fixture, sport: fixtureSport || sport }, resultPayloads);
         const event = await upsertOpticEvent(merged);
         stats.events += 1;
         if (event.status === 'LIVE') stats.live += 1;
         if (event.status === 'FINISHED' || event.completed) stats.finished += 1;
       }
     } catch (error) {
-      stats.skippedSports.push({ sportKey: sport, message: error?.message || String(error), status: error?.status || null });
+      stats.skippedSports.push({ sportKey: isAllSportsMode(sport) ? 'all' : sport, message: error?.message || String(error), status: error?.status || null });
     }
   }
 
