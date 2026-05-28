@@ -103,7 +103,6 @@ async function fetchOpticJson(path, params = {}, sport = '') {
       headers: {
         Accept: 'application/json',
         'X-Api-Key': key,
-        'x-api-key': key,
       },
       signal: controller.signal,
     });
@@ -187,7 +186,6 @@ async function fetchOpticStreamSnapshot(path, params = {}, sport = '') {
     headers: {
       Accept: 'text/event-stream, application/json',
       'X-Api-Key': key,
-      'x-api-key': key,
     },
   });
 

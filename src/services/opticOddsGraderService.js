@@ -90,7 +90,6 @@ async function fetchGrader(path, params) {
       headers: {
         Accept: 'application/json',
         'X-Api-Key': key,
-        'x-api-key': key,
       },
       signal: controller.signal,
     });
