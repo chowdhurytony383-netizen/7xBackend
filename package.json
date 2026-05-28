@@ -19,7 +19,8 @@
     "sports:clear-old": "node src/seed/clearOldSportsEvents.js",
     "jili:seed-games": "node src/seed/seedJiliGames.js",
     "crash:fix-indexes": "node src/seed/fixCrashBetIndexes.js",
-    "sports:opticodds:sync": "SPORTS_PROVIDER=opticodds SPORTS_ODDS_PROVIDER=opticodds node src/seed/syncSportsNow.js"
+    "sports:opticodds:sync": "SPORTS_PROVIDER=opticodds SPORTS_ODDS_PROVIDER=opticodds node src/seed/syncSportsNow.js",
+    "sports:opticodds:sync:all": "OPTICODDS_DEFAULT_SPORTS=all SPORTS_PROVIDER=opticodds SPORTS_ODDS_PROVIDER=opticodds node src/seed/syncSportsNow.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

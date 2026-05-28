@@ -1,62 +1,57 @@
-7XBET Backend - OpticOdds integration patch
+7XBET OpticOdds All Sports Integration Patch
 ==========================================
 
-Files included:
-- package.json
-- src/services/opticOddsProviderService.js
-- src/services/freeSportsProviderService.js
-- src/controllers/sportsController.js
+Apply these files into your backend root:
 
-What this patch does:
-1. Adds OpticOdds as a backend sports provider.
-2. Supports active fixtures + odds/results stream snapshot flow.
-3. Stores OpticOdds events in SportsAutoEvent with provider='opticodds'.
-4. Stores open odds markets in SportsAutoMarket for betting.
-5. Lets live/ongoing score matches show even if odds are unavailable.
-6. Keeps SPORTS_REQUIRE_REAL_ODDS for betting safety, not for hiding live score matches.
-7. Adds script: npm run sports:opticodds:sync
+package.json
+src/services/opticOddsProviderService.js
+src/services/freeSportsProviderService.js
+src/controllers/sportsController.js
 
-Important security:
-- Do NOT paste the API key into frontend code.
-- Put the key only in Render Backend Environment.
-- Since the key was shared in chat, ask OpticOdds for a new/rotated key before production.
+What changed:
+- OPTICODDS_DEFAULT_SPORTS=all now syncs all active fixtures returned by OpticOdds.
+- The provider can call /fixtures/active without a sport filter, then detect each fixture's sport automatically.
+- Cricket, soccer, tennis, basketball, MMA/boxing, American football, baseball, hockey, rugby, volleyball, and any other active OpticOdds sport can be stored if the trial key has access.
+- Live score display remains separate from betting availability: events can show even when markets are missing; betting stays disabled when no real odds exist.
 
-Render Environment example:
+Required Render env:
+
 OPTICODDS_ENABLED=true
-OPTICODDS_API_KEY=your_new_rotated_key
+OPTICODDS_API_KEY=YOUR_ROTATED_KEY
 OPTICODDS_API_BASE_URL=https://api.opticodds.com/api/v3
+
 SPORTS_PROVIDER=opticodds
 SPORTS_ODDS_PROVIDER=opticodds
-OPTICODDS_DEFAULT_SPORTS=cricket,soccer
+
+OPTICODDS_DEFAULT_SPORTS=all
 OPTICODDS_DEFAULT_SPORTBOOKS=pinnacle,betfair_exchange
 OPTICODDS_DEFAULT_MARKETS=moneyline
+OPTICODDS_FIXTURE_LIMIT=120
+OPTICODDS_STREAM_READ_MS=2500
+OPTICODDS_TIMEOUT_MS=15000
+
 OPTICODDS_ACTIVE_FIXTURES_PATH=/fixtures/active
 OPTICODDS_STREAM_ODDS_PATH=/stream-odds
 OPTICODDS_STREAM_RESULTS_PATH=/stream-results
-OPTICODDS_FIXTURE_LIMIT=40
-OPTICODDS_STREAM_READ_MS=3500
+
 SPORTS_HIDE_EVENTS_WITHOUT_ODDS=false
 SPORTS_REQUIRE_REAL_ODDS=true
 SPORTS_USE_BOOK_ODDS_ONLY=true
 SPORTS_USE_PROVIDER_ODDS_ONLY=true
 SPORTS_AUTO_SYNC_ON_REQUEST=false
 SPORTS_AUTO_SYNC_ON_REQUEST_BLOCKING=false
-SPORTS_RESPONSE_CACHE_SECONDS=10
-SPORTS_ODDS_SYNC_TTL_SECONDS=30
-SPORTS_SCORE_SYNC_TTL_SECONDS=20
 
-After applying files, run in Render Shell:
+Run checks:
+
 node --check src/services/opticOddsProviderService.js
 node --check src/services/freeSportsProviderService.js
 node --check src/controllers/sportsController.js
-npm run sports:opticodds:sync
+npm run sports:opticodds:sync:all
 
-If OpticOdds uses different endpoint names in your account, change only these envs:
-OPTICODDS_ACTIVE_FIXTURES_PATH=/fixtures-active
-OPTICODDS_STREAM_ODDS_PATH=/stream-odds
-OPTICODDS_STREAM_RESULTS_PATH=/stream-results
+Cron recommendation:
+- Start with every 1 minute only if the trial quota supports it.
+- If sync is slow or rate-limited, lower OPTICODDS_FIXTURE_LIMIT to 50-80, or run every 2 minutes.
 
-For production realtime:
-- Use Render Cron Job every 1 minute:
-  npm run sports:opticodds:sync
-- Keep SPORTS_AUTO_SYNC_ON_REQUEST=false so homepage stays fast.
+Important:
+- Do not put OPTICODDS_API_KEY in frontend/VITE env.
+- Rotate the API key you shared publicly before production.
