@@ -2,15 +2,23 @@ import mongoose from 'mongoose';
 
 const selectionSchema = new mongoose.Schema({
   selectionId: { type: String, required: true },
+  providerOddsId: { type: String, default: '' },
+  sportsbook: { type: String, default: '' },
+  lineId: { type: String, default: '' },
+  groupingKey: { type: String, default: '' },
   name: { type: String, required: true },
+  displayName: { type: String, default: '' },
   price: { type: Number, required: true },
   lastPrice: { type: Number, default: 0 },
   point: { type: Number, default: null },
+  isMain: { type: Boolean, default: true },
   status: {
     type: String,
     enum: ['OPEN', 'SUSPENDED', 'CLOSED'],
     default: 'OPEN',
   },
+  lastLockedAt: Date,
+  raw: { type: mongoose.Schema.Types.Mixed, default: {} },
 }, { _id: false });
 
 const sportsAutoMarketSchema = new mongoose.Schema({
@@ -19,6 +27,7 @@ const sportsAutoMarketSchema = new mongoose.Schema({
   providerEventId: { type: String, required: true, index: true },
   marketKey: { type: String, default: 'h2h', index: true },
   marketName: { type: String, default: 'Match Winner' },
+  marketDisplayName: { type: String, default: '' },
   bookmaker: { type: String, default: '' },
   selections: { type: [selectionSchema], default: [] },
   status: {
