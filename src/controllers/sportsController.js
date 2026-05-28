@@ -542,16 +542,24 @@ function withSyntheticDraw(selections = [], event = {}, marketKey = 'h2h') {
 
 function marketToOdds(market, event = {}) {
   if (!market) return [];
-  const mapped = (market.selections || []).map((selection) => ({
+  const mapped = (market.selections || [])
+    .filter((selection) => selection.status === 'OPEN' && Number(selection.price || 0) > 1)
+    .map((selection) => ({
     key: selection.selectionId,
     selectionId: selection.selectionId,
+    providerOddsId: selection.providerOddsId || '',
+    sportsbook: selection.sportsbook || market.bookmaker || '',
     label: selection.name,
     name: selection.name,
+    displayName: selection.displayName || selection.name,
     value: selection.price,
     odds: selection.price,
     price: selection.price,
+    point: selection.point ?? null,
+    status: selection.status || 'OPEN',
     marketKey: market.marketKey,
     marketName: market.marketName,
+    marketDisplayName: market.marketDisplayName || market.marketName,
   }));
 
   return withSyntheticDraw(mapped, event, market.marketKey).slice(0, 9);
@@ -594,6 +602,7 @@ function formatAutoEventFromMarket(event, market = null) {
     matchTime: status,
     completed: event.completed,
     marketStatus: market?.status || 'CLOSED',
+    bookmaker: market?.bookmaker || '',
     isAutoSports: true,
   };
 }
