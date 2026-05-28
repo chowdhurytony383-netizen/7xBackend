@@ -6,32 +6,12 @@ import SportsAutoMarket from '../models/SportsAutoMarket.js';
 import SportsSyncLog from '../models/SportsSyncLog.js';
 
 const PROVIDER = 'opticodds';
-const ALL_SPORTS_TOKEN = '__opticodds_all_sports__';
 const DEFAULT_BASE_URL = 'https://api.opticodds.com/api/v3';
 const DEFAULT_ACTIVE_PATHS = ['/fixtures/active', '/fixtures-active'];
-const DEFAULT_ODDS_PATHS = ['/stream-odds', '/stream/{sport}/odds'];
-const DEFAULT_RESULTS_PATHS = ['/stream-results', '/stream/{sport}/results'];
-const DEFAULT_ALL_SPORTS_LIST = [
-  'cricket',
-  'soccer',
-  'basketball',
-  'tennis',
-  'baseball',
-  'hockey',
-  'football',
-  'american_football',
-  'boxing',
-  'mma',
-  'golf',
-  'rugby',
-  'rugby_league',
-  'rugby_union',
-  'volleyball',
-  'esports',
-  'darts',
-  'table_tennis',
-  'aussie_rules',
-];
+const DEFAULT_ODDS_PATHS = ['/fixtures/odds'];
+const DEFAULT_RESULTS_PATHS = ['/fixtures/results'];
+const DEFAULT_ODDS_STREAM_PATHS = ['/stream/odds/{sport}'];
+const DEFAULT_RESULTS_STREAM_PATHS = ['/stream/results/{sport}'];
 
 let cachedSuccessfulActivePath = '';
 let cachedSuccessfulOddsPath = '';
@@ -90,7 +70,9 @@ function makeUrl(path, params = {}, sport = '') {
   Object.entries(params || {}).forEach(([paramKey, paramValue]) => {
     if (paramValue === undefined || paramValue === null || paramValue === '') return;
     if (Array.isArray(paramValue)) {
-      if (paramValue.length) url.searchParams.set(paramKey, paramValue.join(','));
+      paramValue.forEach((value) => {
+        if (value !== undefined && value !== null && value !== '') url.searchParams.append(paramKey, String(value));
+      });
       return;
     }
     url.searchParams.set(paramKey, String(paramValue));
@@ -267,26 +249,7 @@ async function fetchFirstWorkingStream(paths = [], params = {}, sport = '', cach
 
 function firstString(...values) {
   for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      const text = String(value).trim();
-      if (text) return text;
-      continue;
-    }
-    if (typeof value === 'object') {
-      const text = String(
-        value.id
-        || value.key
-        || value.name
-        || value.title
-        || value.display_name
-        || value.displayName
-        || value.full_name
-        || value.fullName
-        || ''
-      ).trim();
-      if (text) return text;
-    }
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
   }
   return '';
 }
@@ -307,12 +270,12 @@ function dataArray(payload = {}) {
   if (Array.isArray(payload)) return payload;
   return arrayFrom(
     payload.data,
+    payload.results,
+    payload.odds,
     payload.fixtures,
     payload.fixture,
     payload.events,
     payload.matches,
-    payload.results,
-    payload.odds,
     payload.response
   );
 }
@@ -333,24 +296,15 @@ function eventIdFrom(item = {}) {
 }
 
 function sportFrom(item = {}, fallback = '') {
-  return normalizeSportKey(firstString(
-    item.sport?.id,
-    item.sport?.key,
-    item.sport?.name,
+  return firstString(
     item.sport,
     item.sport_key,
     item.sportKey,
-    item.fixture?.sport?.id,
-    item.fixture?.sport?.key,
-    item.fixture?.sport?.name,
     item.fixture?.sport,
-    item.league?.sport?.id,
-    item.league?.sport?.key,
-    item.league?.sport?.name,
     item.league?.sport,
     fallback,
     'sports'
-  ));
+  ).toLowerCase().replace(/\s+/g, '_');
 }
 
 function titleCase(value = '') {
@@ -370,24 +324,17 @@ function sideNameFromParticipant(participants = [], side = 'home') {
 }
 
 function homeNameFrom(item = {}) {
-  const homeCompetitors = arrayFrom(item.home_competitors, item.homeCompetitors, item.fixture?.home_competitors, item.fixture?.homeCompetitors);
+  const teamsObject = firstObject(item.teams, item.fixture?.teams);
   const participants = arrayFrom(item.participants, item.competitors, item.teams, item.fixture?.participants, item.fixture?.competitors);
   return firstString(
-    item.home_team_display,
-    item.homeTeamDisplay,
     item.home_team,
     item.homeTeam,
     item.home?.name,
     item.home?.display_name,
-    item.teams?.home?.name,
-    item.fixture?.home_team_display,
-    item.fixture?.homeTeamDisplay,
+    teamsObject?.home?.name,
     item.fixture?.home_team,
     item.fixture?.homeTeam,
     item.fixture?.home?.name,
-    homeCompetitors[0]?.name,
-    homeCompetitors[0]?.display_name,
-    homeCompetitors[0]?.team?.name,
     sideNameFromParticipant(participants, 'home'),
     participants[0]?.name,
     participants[0]?.team?.name,
@@ -396,24 +343,17 @@ function homeNameFrom(item = {}) {
 }
 
 function awayNameFrom(item = {}) {
-  const awayCompetitors = arrayFrom(item.away_competitors, item.awayCompetitors, item.fixture?.away_competitors, item.fixture?.awayCompetitors);
+  const teamsObject = firstObject(item.teams, item.fixture?.teams);
   const participants = arrayFrom(item.participants, item.competitors, item.teams, item.fixture?.participants, item.fixture?.competitors);
   return firstString(
-    item.away_team_display,
-    item.awayTeamDisplay,
     item.away_team,
     item.awayTeam,
     item.away?.name,
     item.away?.display_name,
-    item.teams?.away?.name,
-    item.fixture?.away_team_display,
-    item.fixture?.awayTeamDisplay,
+    teamsObject?.away?.name,
     item.fixture?.away_team,
     item.fixture?.awayTeam,
     item.fixture?.away?.name,
-    awayCompetitors[0]?.name,
-    awayCompetitors[0]?.display_name,
-    awayCompetitors[0]?.team?.name,
     sideNameFromParticipant(participants, 'away'),
     participants[1]?.name,
     participants[1]?.team?.name,
@@ -423,18 +363,13 @@ function awayNameFrom(item = {}) {
 
 function leagueFrom(item = {}) {
   return firstString(
-    item.league?.name,
-    item.league?.id,
     item.league,
     item.league_name,
     item.leagueName,
-    item.competition?.name,
     item.competition,
-    item.tournament?.name,
     item.tournament,
-    item.fixture?.league?.name,
-    item.fixture?.league?.id,
     item.fixture?.league,
+    item.fixture?.league?.name,
     item.sport_title,
     item.sportTitle,
     ''
@@ -477,37 +412,6 @@ function scoreDisplay(score = 0, wickets = null, overs = '') {
 
 function scoreSideFromRows(item = {}, homeTeam = '', awayTeam = '') {
   const scores = [];
-  const opticScores = item.result?.scores || item.fixture?.result?.scores || null;
-
-  if (opticScores?.home || opticScores?.away) {
-    const home = opticScores.home || {};
-    const away = opticScores.away || {};
-    const homeTotal = home.total ?? home.score ?? home.points ?? home.goals ?? home.runs ?? 0;
-    const awayTotal = away.total ?? away.score ?? away.points ?? away.goals ?? away.runs ?? 0;
-    const homeClock = item.result?.in_play_data?.clock || item.in_play_data?.clock || '';
-    const awayClock = item.result?.in_play_data?.clock || item.in_play_data?.clock || '';
-
-    scores.push({
-      side: 'home',
-      name: homeTeam,
-      score: numberFrom(homeTotal, 0),
-      label: homeTeam,
-      display: String(homeTotal ?? 0),
-      periods: home.periods || {},
-      clock: homeClock,
-    });
-    scores.push({
-      side: 'away',
-      name: awayTeam,
-      score: numberFrom(awayTotal, 0),
-      label: awayTeam,
-      display: String(awayTotal ?? 0),
-      periods: away.periods || {},
-      clock: awayClock,
-    });
-    return scores;
-  }
-
   const homeScore = item.home_score ?? item.homeScore ?? item.score?.home ?? item.scores?.home ?? item.result?.home;
   const awayScore = item.away_score ?? item.awayScore ?? item.score?.away ?? item.scores?.away ?? item.result?.away;
 
@@ -619,16 +523,16 @@ function rowsFromNestedOdds(source = {}) {
 
 function rowsFromFlatOdds(source = {}) {
   const rows = [];
-  const candidates = [source, ...dataArray(source)];
+  const candidates = [source, ...dataArray(source), ...arrayFrom(source.data?.odds, source.fixture_odds, source.lines, source.selections)];
 
   candidates.forEach((item) => {
     if (!item || typeof item !== 'object') return;
-    const price = item.price ?? item.odds ?? item.value ?? item.decimal ?? item.decimal_odds;
-    const selectionName = firstString(item.selection, item.selection_name, item.selectionName, item.name, item.outcome, item.team, item.participant);
+    const price = item.price ?? item.odds ?? item.value ?? item.decimal ?? item.decimal_odds ?? item.decimal_price ?? item.odds_decimal;
+    const selectionName = firstString(item.selection, item.selection_name, item.selectionName, item.name, item.outcome, item.team, item.participant, item.participant_name, item.label);
     if (!selectionName || Number(price || 0) <= 1) return;
 
     rows.push({
-      sportsbook: firstString(item.sportsbook, item.bookmaker, item.book, item.sportsbook_key, item.bookmaker_key),
+      sportsbook: firstString(item.sportsbook, item.sportsbook_id, item.bookmaker, item.book, item.sportsbook_key, item.bookmaker_key),
       marketKey: normalizeMarketKey(firstString(item.market, item.market_key, item.marketKey, item.market_name, item.name)),
       marketName: marketNameFor(normalizeMarketKey(firstString(item.market, item.market_key, item.marketKey, item.market_name, item.name))),
       selectionName,
@@ -717,11 +621,6 @@ async function upsertOpticEvent(fixture = {}) {
         status: eventData.status,
         completed: eventData.completed,
         scores: eventData.scores,
-        score: {
-          home: eventData.scores.find((item) => item.side === 'home')?.display || String(eventData.scores.find((item) => item.side === 'home')?.score ?? 0),
-          away: eventData.scores.find((item) => item.side === 'away')?.display || String(eventData.scores.find((item) => item.side === 'away')?.score ?? 0),
-        },
-        scoreSource: PROVIDER,
         lastProviderUpdate: new Date(),
         lastScoreUpdate: eventData.scores.length ? new Date() : undefined,
         raw: {
@@ -767,123 +666,50 @@ async function upsertOpticMarkets(event, fixture = {}, payloads = []) {
   return marketCount;
 }
 
-function normalizeSportKey(value = '') {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, 'and')
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-}
-
 function configuredSports() {
-  const configuredValue = process.env.OPTICODDS_DEFAULT_SPORTS
-    || process.env.OPTICODDS_SPORTS
-    || process.env.SPORTS_AUTO_SPORT_KEYS
-    || 'cricket,soccer';
-
-  const sports = csv(configuredValue, ['cricket', 'soccer'])
-    .map(normalizeSportKey)
-    .filter(Boolean);
-
-  if (sports.some((item) => ['all', 'active', '*', 'all_sports', 'allsports'].includes(item))) {
-    return [ALL_SPORTS_TOKEN];
-  }
-
-  return sports;
+  return csv(process.env.OPTICODDS_DEFAULT_SPORTS || process.env.OPTICODDS_SPORTS || process.env.SPORTS_AUTO_SPORT_KEYS || 'cricket,soccer', ['cricket', 'soccer'])
+    .map((item) => item.toLowerCase())
+    .filter((item) => !['all', 'active', '*'].includes(item));
 }
 
-function configuredAllSportsFallback() {
-  return csv(
-    process.env.OPTICODDS_ALL_SPORTS_LIST || process.env.OPTICODDS_ALL_SPORT_KEYS || '',
-    DEFAULT_ALL_SPORTS_LIST
-  )
-    .map(normalizeSportKey)
-    .filter(Boolean)
-    .filter((sport, index, all) => all.indexOf(sport) === index);
-}
-
-function sportKeyFromDiscoveryRow(row = {}) {
-  const raw = firstString(
-    row.key,
-    row.id,
-    row.sport,
-    row.sport_key,
-    row.sportKey,
-    row.slug,
-    row.name,
-    row.title
-  );
-  return normalizeSportKey(raw);
-}
-
-async function discoverOpticOddsSports() {
-  const maxSports = Math.max(1, Number(process.env.OPTICODDS_MAX_SPORTS || 30));
-  const fallback = configuredAllSportsFallback().slice(0, maxSports);
-
-  if (bool(process.env.OPTICODDS_DISABLE_SPORTS_DISCOVERY, false)) {
-    return fallback;
-  }
-
-  try {
-    const paths = csv(process.env.OPTICODDS_SPORTS_PATH || '', ['/sports']);
-    const result = await fetchFirstWorkingJson(paths, {}, '', '');
-    const discovered = dataArray(result.payload)
-      .map(sportKeyFromDiscoveryRow)
-      .filter(Boolean)
-      .filter((sport, index, all) => all.indexOf(sport) === index)
-      .filter((sport) => !/outright|future|winner/i.test(sport))
-      .slice(0, maxSports);
-
-    return discovered.length ? discovered : fallback;
-  } catch (error) {
-    return fallback;
-  }
-}
-
-async function resolveSportsForSync() {
-  const sports = configuredSports();
-  if (!sports.some(isAllSportsMode)) return sports;
-  return discoverOpticOddsSports();
-}
-
-function isAllSportsMode(sport = '') {
-  return sport === ALL_SPORTS_TOKEN;
-}
-
-function sportForFixture(fixture = {}, configuredSport = '') {
-  const detected = sportFrom(fixture, '');
-  if (detected && detected !== 'sports') return detected;
-  return isAllSportsMode(configuredSport) ? '' : configuredSport;
+function configuredMarkets() {
+  return csv(process.env.OPTICODDS_DEFAULT_MARKETS || process.env.SPORTS_DEFAULT_MARKETS || 'moneyline', ['moneyline']);
 }
 
 function activeFixtureParams(sport = '') {
-  const params = {};
-  if (sport) params.sport = sport;
+  return {
+    sport: sport ? [sport] : [],
+    sportsbook: preferredSportsbooks(),
+  };
+}
 
-  // Keep /fixtures/active broad. Sportsbook/market filters can make OpticOdds
-  // return zero fixtures even when active fixtures exist. Filter odds at the
-  // stream/market stage instead.
-  if (bool(process.env.OPTICODDS_ACTIVE_LIVE_ONLY, false)) params.is_live = 'true';
-  if (process.env.OPTICODDS_ACTIVE_LEAGUE) params.league = process.env.OPTICODDS_ACTIVE_LEAGUE;
-  if (process.env.OPTICODDS_ACTIVE_TOURNAMENT_ID) params.tournament_id = process.env.OPTICODDS_ACTIVE_TOURNAMENT_ID;
-  if (process.env.OPTICODDS_ACTIVE_TEAM_ID) params.team_id = process.env.OPTICODDS_ACTIVE_TEAM_ID;
-  if (process.env.OPTICODDS_ACTIVE_FIXTURE_ID) params.id = process.env.OPTICODDS_ACTIVE_FIXTURE_ID;
+function oddsSnapshotParams(fixture = {}, sport = '') {
+  const fixtureId = eventIdFrom(fixture);
+  return {
+    fixture_id: fixtureId ? [fixtureId] : [],
+    sportsbook: preferredSportsbooks(),
+    market: configuredMarkets(),
+    is_main: 'true',
+    odds_format: 'decimal',
+  };
+}
 
-  return params;
+function resultsSnapshotParams(fixture = {}, sport = '') {
+  const fixtureId = eventIdFrom(fixture);
+  return {
+    fixture_id: fixtureId ? [fixtureId] : [],
+  };
 }
 
 function streamParams(fixture = {}, sport = '') {
   const fixtureId = eventIdFrom(fixture);
   return {
-    fixture_id: fixtureId,
-    fixtureId,
-    id: fixtureId,
+    fixture_id: fixtureId ? [fixtureId] : [],
     sport,
-    sportsbook: preferredSportsbooks().join(','),
-    sportsbooks: preferredSportsbooks().join(','),
-    market: process.env.OPTICODDS_DEFAULT_MARKETS || process.env.SPORTS_DEFAULT_MARKETS || 'moneyline',
-    markets: process.env.OPTICODDS_DEFAULT_MARKETS || process.env.SPORTS_DEFAULT_MARKETS || 'moneyline',
+    sportsbook: preferredSportsbooks(),
+    market: configuredMarkets(),
+    is_main: 'true',
+    odds_format: 'decimal',
   };
 }
 
@@ -893,25 +719,40 @@ function fixtureLimit() {
 }
 
 async function fetchActiveFixturesForSport(sport = '') {
-  const actualSport = isAllSportsMode(sport) ? '' : sport;
   const paths = csv(process.env.OPTICODDS_ACTIVE_FIXTURES_PATH || '', DEFAULT_ACTIVE_PATHS);
-  const result = await fetchFirstWorkingJson(paths, activeFixtureParams(actualSport), actualSport, cachedSuccessfulActivePath);
+  const result = await fetchFirstWorkingJson(paths, activeFixtureParams(sport), sport, cachedSuccessfulActivePath);
   cachedSuccessfulActivePath = result.path;
   return dataArray(result.payload);
 }
 
 async function fetchOddsPayloadsForFixture(fixture = {}, sport = '') {
-  const explicit = csv(process.env.OPTICODDS_STREAM_ODDS_PATH || process.env.OPTICODDS_ODDS_STREAM_PATH || '', DEFAULT_ODDS_PATHS);
-  const result = await fetchFirstWorkingStream(explicit, streamParams(fixture, sport), sport, cachedSuccessfulOddsPath);
-  cachedSuccessfulOddsPath = result.path;
-  return result.payloads;
+  const snapshotPaths = csv(process.env.OPTICODDS_ODDS_PATH || process.env.OPTICODDS_ODDS_SNAPSHOT_PATH || '', DEFAULT_ODDS_PATHS);
+  try {
+    const result = await fetchFirstWorkingJson(snapshotPaths, oddsSnapshotParams(fixture, sport), sport, cachedSuccessfulOddsPath);
+    cachedSuccessfulOddsPath = result.path;
+    return [result.payload];
+  } catch (snapshotError) {
+    if ([404, 422].includes(Number(snapshotError?.status || 0))) return [];
+    if (!bool(process.env.OPTICODDS_ALLOW_STREAM_FALLBACK, false)) throw snapshotError;
+    const streamPaths = csv(process.env.OPTICODDS_STREAM_ODDS_PATH || process.env.OPTICODDS_ODDS_STREAM_PATH || '', DEFAULT_ODDS_STREAM_PATHS);
+    const result = await fetchFirstWorkingStream(streamPaths, streamParams(fixture, sport), sport, '');
+    return result.payloads;
+  }
 }
 
 async function fetchResultsPayloadsForFixture(fixture = {}, sport = '') {
-  const explicit = csv(process.env.OPTICODDS_STREAM_RESULTS_PATH || process.env.OPTICODDS_RESULTS_STREAM_PATH || '', DEFAULT_RESULTS_PATHS);
-  const result = await fetchFirstWorkingStream(explicit, streamParams(fixture, sport), sport, cachedSuccessfulResultsPath);
-  cachedSuccessfulResultsPath = result.path;
-  return result.payloads;
+  const snapshotPaths = csv(process.env.OPTICODDS_RESULTS_PATH || process.env.OPTICODDS_RESULTS_SNAPSHOT_PATH || '', DEFAULT_RESULTS_PATHS);
+  try {
+    const result = await fetchFirstWorkingJson(snapshotPaths, resultsSnapshotParams(fixture, sport), sport, cachedSuccessfulResultsPath);
+    cachedSuccessfulResultsPath = result.path;
+    return [result.payload];
+  } catch (snapshotError) {
+    if ([404, 422].includes(Number(snapshotError?.status || 0))) return [];
+    if (!bool(process.env.OPTICODDS_ALLOW_STREAM_FALLBACK, false)) throw snapshotError;
+    const streamPaths = csv(process.env.OPTICODDS_STREAM_RESULTS_PATH || process.env.OPTICODDS_RESULTS_STREAM_PATH || '', DEFAULT_RESULTS_STREAM_PATHS);
+    const result = await fetchFirstWorkingStream(streamPaths, streamParams(fixture, sport), sport, '');
+    return result.payloads;
+  }
 }
 
 function mergeResultPayloadIntoFixture(fixture = {}, payloads = []) {
@@ -968,20 +809,19 @@ export async function syncOpticOddsOdds({ force = false } = {}) {
   if (!opticOddsProviderConfigured()) return { skipped: true, reason: 'OPTICODDS_API_KEY missing' };
 
   const startedAt = new Date();
-  const sports = await resolveSportsForSync();
+  const sports = configuredSports();
   const stats = { mode: 'opticodds_snapshot', sports: sports.length, events: 0, markets: 0, skippedSports: [], errors: [] };
 
   for (const sport of sports) {
     try {
       const fixtures = (await fetchActiveFixturesForSport(sport)).slice(0, fixtureLimit());
       for (const fixture of fixtures) {
-        const fixtureSport = sportForFixture(fixture, sport);
-        const event = await upsertOpticEvent({ ...fixture, sport: fixtureSport || sport });
+        const event = await upsertOpticEvent({ ...fixture, sport });
         let streamPayloads = [];
         try {
-          streamPayloads = await fetchOddsPayloadsForFixture(fixture, fixtureSport);
+          streamPayloads = await fetchOddsPayloadsForFixture(fixture, sport);
         } catch (error) {
-          stats.errors.push({ sport: fixtureSport || sport, fixtureId: event.providerEventId, type: 'odds-stream', message: error?.message || String(error), status: error?.status || null });
+          stats.errors.push({ sport, fixtureId: event.providerEventId, type: 'odds-stream', message: error?.message || String(error), status: error?.status || null });
         }
 
         const marketCount = await upsertOpticMarkets(event, fixture, streamPayloads);
@@ -989,7 +829,7 @@ export async function syncOpticOddsOdds({ force = false } = {}) {
         stats.markets += marketCount;
       }
     } catch (error) {
-      stats.skippedSports.push({ sportKey: isAllSportsMode(sport) ? 'all' : sport, message: error?.message || String(error), status: error?.status || null });
+      stats.skippedSports.push({ sportKey: sport, message: error?.message || String(error), status: error?.status || null });
     }
   }
 
@@ -1012,29 +852,28 @@ export async function syncOpticOddsScores({ force = false } = {}) {
   if (!opticOddsProviderConfigured()) return { skipped: true, reason: 'OPTICODDS_API_KEY missing' };
 
   const startedAt = new Date();
-  const sports = await resolveSportsForSync();
+  const sports = configuredSports();
   const stats = { mode: 'opticodds_results_snapshot', sports: sports.length, events: 0, live: 0, finished: 0, skippedSports: [], errors: [] };
 
   for (const sport of sports) {
     try {
       const fixtures = (await fetchActiveFixturesForSport(sport)).slice(0, fixtureLimit());
       for (const fixture of fixtures) {
-        const fixtureSport = sportForFixture(fixture, sport);
         let resultPayloads = [];
         try {
-          resultPayloads = await fetchResultsPayloadsForFixture(fixture, fixtureSport);
+          resultPayloads = await fetchResultsPayloadsForFixture(fixture, sport);
         } catch (error) {
-          stats.errors.push({ sport: fixtureSport || sport, fixtureId: eventIdFrom(fixture), type: 'results-stream', message: error?.message || String(error), status: error?.status || null });
+          stats.errors.push({ sport, fixtureId: eventIdFrom(fixture), type: 'results-stream', message: error?.message || String(error), status: error?.status || null });
         }
 
-        const merged = mergeResultPayloadIntoFixture({ ...fixture, sport: fixtureSport || sport }, resultPayloads);
+        const merged = mergeResultPayloadIntoFixture({ ...fixture, sport }, resultPayloads);
         const event = await upsertOpticEvent(merged);
         stats.events += 1;
         if (event.status === 'LIVE') stats.live += 1;
         if (event.status === 'FINISHED' || event.completed) stats.finished += 1;
       }
     } catch (error) {
-      stats.skippedSports.push({ sportKey: isAllSportsMode(sport) ? 'all' : sport, message: error?.message || String(error), status: error?.status || null });
+      stats.skippedSports.push({ sportKey: sport, message: error?.message || String(error), status: error?.status || null });
     }
   }
 
