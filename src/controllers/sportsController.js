@@ -14,6 +14,7 @@ import { getSportsMatchDetails, sportsDetailsConfigured } from '../services/spor
 import { apiSportsOddsProviderConfigured } from '../services/apiSportsOddsProviderService.js';
 import { sportmonksCricketConfigured } from '../services/sportmonksCricketService.js';
 import { sportmonksFootballConfigured } from '../services/sportmonksFootballService.js';
+import { opticOddsProviderConfigured } from '../services/opticOddsProviderService.js';
 import { refreshEventScoresFromDetails } from '../services/sportsRealtimeMergeService.js';
 
 let backgroundSportsSyncPromise = null;
@@ -32,6 +33,7 @@ function normalizeProviderName(value = '') {
   if (!provider) return 'theoddsapi';
   if (['lowcost', 'low-cost', 'cheap', 'hybrid', 'multi', 'all', 'the-odds-api', 'the_odds_api', 'oddsapi', 'theodds'].includes(provider)) return 'theoddsapi';
   if (['api-sports', 'api_sports', 'apisports'].includes(provider)) return 'apisports';
+  if (['opticodds', 'optic-odds', 'optic_odds'].includes(provider)) return 'opticodds';
   if (['sportmonkscricket', 'sportmonks-cricket', 'sportmonks_cricket'].includes(provider)) return 'sportmonks-cricket';
   if (['sportmonksfootball', 'sportmonks-football', 'sportmonks_football'].includes(provider)) return 'sportmonks-football';
   return provider;
@@ -95,6 +97,10 @@ function sportsApiKeyConfigured() {
     return apiSportsOddsProviderConfigured();
   }
 
+  if (provider === 'opticodds' || provider === 'optic-odds' || provider === 'optic_odds') {
+    return opticOddsProviderConfigured();
+  }
+
   if (provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket') {
     return sportmonksCricketConfigured();
   }
@@ -112,6 +118,8 @@ function sportsApiKeyConfigured() {
     || process.env.THE_ODDS_API_KEY
     || process.env.SPORTSGAMEODDS_API_KEY
     || process.env.SPORTS_GAME_ODDS_API_KEY
+    || process.env.OPTICODDS_API_KEY
+    || process.env.OPTIC_ODDS_API_KEY
   );
 }
 
@@ -141,10 +149,12 @@ function boolEnv(name, fallback = false) {
 
 function requireRealOddsForList() {
   // Visibility and betting safety are separate.
-  // SPORTS_REQUIRE_REAL_ODDS keeps fake odds off for betting;
-  // SPORTS_HIDE_EVENTS_WITHOUT_ODDS controls whether matches without odds are hidden from the list.
-  if (process.env.SPORTS_HIDE_EVENTS_WITHOUT_ODDS !== undefined) return boolEnv('SPORTS_HIDE_EVENTS_WITHOUT_ODDS', false);
-  if (process.env.SPORTS_REQUIRE_REAL_ODDS !== undefined) return boolEnv('SPORTS_REQUIRE_REAL_ODDS', true);
+  // SPORTS_REQUIRE_REAL_ODDS must keep fake odds off for betting only.
+  // SPORTS_HIDE_EVENTS_WITHOUT_ODDS is the only flag that may hide matches without odds.
+  // This lets official live score events from SportMonks/API-SPORTS/OpticOdds show even when no market is open.
+  if (process.env.SPORTS_HIDE_EVENTS_WITHOUT_ODDS !== undefined) {
+    return boolEnv('SPORTS_HIDE_EVENTS_WITHOUT_ODDS', false);
+  }
   return false;
 }
 
