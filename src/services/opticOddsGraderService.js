@@ -16,10 +16,12 @@ function boolEnv(name, fallback = false) {
 }
 
 function opticOddsApiKey() {
-  return process.env.OPTICODDS_API_KEY
+  return String(
+    process.env.OPTICODDS_API_KEY
     || process.env.OPTIC_ODDS_API_KEY
     || process.env.SPORTS_OPTICODDS_API_KEY
-    || '';
+    || ''
+  ).trim();
 }
 
 function baseUrl() {
@@ -33,6 +35,14 @@ function timeoutMs() {
 
 function authQueryParamName() {
   return String(process.env.OPTICODDS_AUTH_QUERY_PARAM || 'key').trim() || 'key';
+}
+
+function authMode() {
+  return String(process.env.OPTICODDS_AUTH_MODE || 'header').trim().toLowerCase();
+}
+
+function shouldSendAuthQuery() {
+  return authMode() === 'query' || authMode() === 'both' || boolEnv('OPTICODDS_AUTH_QUERY_ENABLED', false);
 }
 
 function safeString(value = '') {
@@ -60,7 +70,7 @@ function selectionForGrader(bet = {}) {
 function buildUrl(path, params = {}) {
   const url = new URL(`${baseUrl()}${path.startsWith('/') ? path : `/${path}`}`);
   const key = opticOddsApiKey();
-  if (key) url.searchParams.set(authQueryParamName(), key);
+  if (key && shouldSendAuthQuery()) url.searchParams.set(authQueryParamName(), key);
   Object.entries(params).forEach(([name, value]) => {
     if (value === undefined || value === null || value === '') return;
     url.searchParams.set(name, String(value));
@@ -171,7 +181,7 @@ export async function gradeOpticOddsBet(bet = {}) {
     void_substitutes: boolEnv('OPTICODDS_GRADER_VOID_SUBSTITUTES', true) ? 'true' : undefined,
   };
 
-  const paths = csv(process.env.OPTICODDS_GRADER_PATH || '', DEFAULT_GRADER_PATHS);
+  const paths = csv(process.env.OPTICODDS_GRADER_ODDS_PATH || process.env.OPTICODDS_GRADER_PATH || '', DEFAULT_GRADER_PATHS);
   let lastError = null;
 
   for (const path of paths) {

@@ -7,11 +7,11 @@ import SportsSyncLog from '../models/SportsSyncLog.js';
 
 const PROVIDER = 'opticodds';
 const DEFAULT_BASE_URL = 'https://api.opticodds.com/api/v3';
-const DEFAULT_ACTIVE_PATHS = ['/fixtures/active', '/fixtures-active'];
+const DEFAULT_ACTIVE_PATHS = ['/fixtures/active'];
 const DEFAULT_ODDS_PATHS = ['/fixtures/odds'];
 const DEFAULT_RESULTS_PATHS = ['/fixtures/results'];
-const DEFAULT_ODDS_STREAM_PATHS = ['/stream/odds/{sport}', '/stream-odds/{sport}', '/stream-odds'];
-const DEFAULT_RESULTS_STREAM_PATHS = ['/stream/results/{sport}', '/stream-results/{sport}', '/stream-results'];
+const DEFAULT_ODDS_STREAM_PATHS = ['/stream/odds/{sport}'];
+const DEFAULT_RESULTS_STREAM_PATHS = ['/stream/results/{sport}'];
 
 let cachedSuccessfulActivePath = '';
 let cachedSuccessfulOddsPath = '';
@@ -33,10 +33,12 @@ function stableId(...parts) {
 }
 
 function opticOddsApiKey() {
-  return process.env.OPTICODDS_API_KEY
+  return String(
+    process.env.OPTICODDS_API_KEY
     || process.env.OPTIC_ODDS_API_KEY
     || process.env.SPORTS_OPTICODDS_API_KEY
-    || '';
+    || ''
+  ).trim();
 }
 
 export function opticOddsProviderConfigured() {
@@ -56,6 +58,14 @@ function authQueryParamName() {
   return String(process.env.OPTICODDS_AUTH_QUERY_PARAM || 'key').trim() || 'key';
 }
 
+function authMode() {
+  return String(process.env.OPTICODDS_AUTH_MODE || 'header').trim().toLowerCase();
+}
+
+function shouldSendAuthQuery() {
+  return authMode() === 'query' || authMode() === 'both' || bool(process.env.OPTICODDS_AUTH_QUERY_ENABLED, false);
+}
+
 function buildPath(template = '', sport = '') {
   return String(template || '')
     .replace(/\{sport\}/g, encodeURIComponent(sport || ''))
@@ -65,7 +75,7 @@ function buildPath(template = '', sport = '') {
 function makeUrl(path, params = {}, sport = '') {
   const url = new URL(`${baseUrl()}${buildPath(path, sport)}`);
   const key = opticOddsApiKey();
-  if (key) url.searchParams.set(authQueryParamName(), key);
+  if (key && shouldSendAuthQuery()) url.searchParams.set(authQueryParamName(), key);
 
   Object.entries(params || {}).forEach(([paramKey, paramValue]) => {
     if (paramValue === undefined || paramValue === null || paramValue === '') return;
@@ -249,9 +259,37 @@ async function fetchFirstWorkingStream(paths = [], params = {}, sport = '', cach
 
 function firstString(...values) {
   for (const value of values) {
-    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      const nested = firstString(...value);
+      if (nested) return nested;
+      continue;
+    }
+    if (typeof value === 'object') {
+      const nested = firstString(
+        value.name,
+        value.display_name,
+        value.displayName,
+        value.title,
+        value.label,
+        value.abbreviation,
+        value.id,
+        value.key
+      );
+      if (nested) return nested;
+      continue;
+    }
+    const text = String(value).trim();
+    if (text) return text;
   }
   return '';
+}
+
+function firstObject(...values) {
+  for (const value of values) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  }
+  return {};
 }
 
 function numberFrom(value, fallback = 0) {
@@ -297,14 +335,20 @@ function eventIdFrom(item = {}) {
 
 function sportFrom(item = {}, fallback = '') {
   return firstString(
+    item.sport?.id,
+    item.sport?.name,
     item.sport,
     item.sport_key,
     item.sportKey,
+    item.fixture?.sport?.id,
+    item.fixture?.sport?.name,
     item.fixture?.sport,
+    item.league?.sport?.id,
+    item.league?.sport?.name,
     item.league?.sport,
     fallback,
     'sports'
-  ).toLowerCase().replace(/\s+/g, '_');
+  ).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'sports';
 }
 
 function titleCase(value = '') {
@@ -320,23 +364,42 @@ function sideNameFromParticipant(participants = [], side = 'home') {
     const rawSide = String(participant?.home_away || participant?.side || participant?.type || participant?.alignment || '').toLowerCase();
     return rawSide === wanted || rawSide.includes(wanted);
   });
-  return firstString(found?.name, found?.participant_name, found?.team?.name, found?.competitor?.name);
+  return firstString(found?.name, found?.display_name, found?.participant_name, found?.abbreviation, found?.team?.name, found?.competitor?.name);
 }
 
 function homeNameFrom(item = {}) {
   const teamsObject = firstObject(item.teams, item.fixture?.teams);
-  const participants = arrayFrom(item.participants, item.competitors, item.teams, item.fixture?.participants, item.fixture?.competitors);
+  const participants = arrayFrom(
+    item.home_competitors,
+    item.homeCompetitors,
+    item.fixture?.home_competitors,
+    item.fixture?.homeCompetitors,
+    item.participants,
+    item.competitors,
+    item.teams,
+    item.fixture?.participants,
+    item.fixture?.competitors
+  );
+  const homeCompetitor = arrayFrom(item.home_competitors, item.homeCompetitors, item.fixture?.home_competitors, item.fixture?.homeCompetitors)[0] || {};
   return firstString(
+    item.home_team_display,
+    item.homeTeamDisplay,
     item.home_team,
     item.homeTeam,
+    homeCompetitor.name,
+    homeCompetitor.display_name,
+    homeCompetitor.abbreviation,
     item.home?.name,
     item.home?.display_name,
     teamsObject?.home?.name,
+    item.fixture?.home_team_display,
+    item.fixture?.homeTeamDisplay,
     item.fixture?.home_team,
     item.fixture?.homeTeam,
     item.fixture?.home?.name,
     sideNameFromParticipant(participants, 'home'),
     participants[0]?.name,
+    participants[0]?.display_name,
     participants[0]?.team?.name,
     'Home Team'
   );
@@ -344,18 +407,37 @@ function homeNameFrom(item = {}) {
 
 function awayNameFrom(item = {}) {
   const teamsObject = firstObject(item.teams, item.fixture?.teams);
-  const participants = arrayFrom(item.participants, item.competitors, item.teams, item.fixture?.participants, item.fixture?.competitors);
+  const participants = arrayFrom(
+    item.away_competitors,
+    item.awayCompetitors,
+    item.fixture?.away_competitors,
+    item.fixture?.awayCompetitors,
+    item.participants,
+    item.competitors,
+    item.teams,
+    item.fixture?.participants,
+    item.fixture?.competitors
+  );
+  const awayCompetitor = arrayFrom(item.away_competitors, item.awayCompetitors, item.fixture?.away_competitors, item.fixture?.awayCompetitors)[0] || {};
   return firstString(
+    item.away_team_display,
+    item.awayTeamDisplay,
     item.away_team,
     item.awayTeam,
+    awayCompetitor.name,
+    awayCompetitor.display_name,
+    awayCompetitor.abbreviation,
     item.away?.name,
     item.away?.display_name,
     teamsObject?.away?.name,
+    item.fixture?.away_team_display,
+    item.fixture?.awayTeamDisplay,
     item.fixture?.away_team,
     item.fixture?.awayTeam,
     item.fixture?.away?.name,
     sideNameFromParticipant(participants, 'away'),
     participants[1]?.name,
+    participants[1]?.display_name,
     participants[1]?.team?.name,
     'Away Team'
   );
@@ -363,13 +445,18 @@ function awayNameFrom(item = {}) {
 
 function leagueFrom(item = {}) {
   return firstString(
+    item.league?.name,
+    item.league?.display_name,
     item.league,
     item.league_name,
     item.leagueName,
+    item.competition?.name,
     item.competition,
+    item.tournament?.name,
     item.tournament,
-    item.fixture?.league,
     item.fixture?.league?.name,
+    item.fixture?.league?.display_name,
+    item.fixture?.league,
     item.sport_title,
     item.sportTitle,
     ''
@@ -388,6 +475,7 @@ function commenceTimeFrom(item = {}) {
     item.kickoffTime,
     item.scheduled,
     item.fixture?.start_date,
+    item.fixture?.startDate,
     item.fixture?.start_time,
     item.fixture?.scheduled,
     ''
@@ -397,6 +485,7 @@ function commenceTimeFrom(item = {}) {
 function normalizeStatus(value = '', item = {}) {
   const text = `${value || item.status || item.status_display || item.game_status || item.state || ''}`.toLowerCase();
   if (item.completed === true || item.is_completed === true || item.finished === true) return 'FINISHED';
+  if (item.is_live === true || item.fixture?.is_live === true) return 'LIVE';
   if (/cancel|postpon|abandon/.test(text)) return 'CANCELLED';
   if (/final|finish|complete|ended|closed|settled|graded|resulted/.test(text)) return 'FINISHED';
   if (/live|in.?play|progress|inning|quarter|period|half|started|running|stump|break|lunch|tea/.test(text)) return 'LIVE';
@@ -754,14 +843,28 @@ function configuredSports() {
 }
 
 function configuredMarkets() {
-  return csv(process.env.OPTICODDS_DEFAULT_MARKETS || process.env.SPORTS_DEFAULT_MARKETS || 'moneyline', ['moneyline']);
+  return csv(process.env.OPTICODDS_DEFAULT_MARKETS || process.env.SPORTS_DEFAULT_MARKETS || 'moneyline', ['moneyline'])
+    .map((market) => {
+      const key = String(market || '').trim().toLowerCase();
+      if (['h2h', 'match_winner', 'winner', 'head_to_head'].includes(key)) return 'moneyline';
+      return market;
+    })
+    .filter(Boolean);
 }
 
 function activeFixtureParams(sport = '') {
-  return {
+  const params = {
     sport: sport ? [sport] : [],
-    sportsbook: preferredSportsbooks(),
   };
+
+  // Some OpticOdds trial/license keys allow /fixtures/active by sport but return
+  // 401/empty when sportsbook is included on the active fixture discovery call.
+  // Keep sportsbook filtering on /fixtures/odds and streams, where it is required.
+  if (bool(process.env.OPTICODDS_FILTER_SPORTBOOK_ON_ACTIVE, false)) {
+    params.sportsbook = preferredSportsbooks();
+  }
+
+  return params;
 }
 
 function oddsSnapshotParams(fixture = {}, sport = '') {
@@ -786,7 +889,6 @@ function streamParams(fixture = {}, sport = '') {
   const fixtureId = eventIdFrom(fixture);
   return {
     fixture_id: fixtureId ? [fixtureId] : [],
-    sport,
     sportsbook: preferredSportsbooks(),
     market: configuredMarkets(),
     is_main: 'true',
