@@ -11,6 +11,27 @@ const DEFAULT_BASE_URL = 'https://api.opticodds.com/api/v3';
 const DEFAULT_ACTIVE_PATHS = ['/fixtures/active', '/fixtures-active'];
 const DEFAULT_ODDS_PATHS = ['/stream-odds', '/stream/{sport}/odds'];
 const DEFAULT_RESULTS_PATHS = ['/stream-results', '/stream/{sport}/results'];
+const DEFAULT_ALL_SPORTS_LIST = [
+  'cricket',
+  'soccer',
+  'basketball',
+  'tennis',
+  'baseball',
+  'hockey',
+  'football',
+  'american_football',
+  'boxing',
+  'mma',
+  'golf',
+  'rugby',
+  'rugby_league',
+  'rugby_union',
+  'volleyball',
+  'esports',
+  'darts',
+  'table_tennis',
+  'aussie_rules',
+];
 
 let cachedSuccessfulActivePath = '';
 let cachedSuccessfulOddsPath = '';
@@ -661,6 +682,15 @@ async function upsertOpticMarkets(event, fixture = {}, payloads = []) {
   return marketCount;
 }
 
+function normalizeSportKey(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
 function configuredSports() {
   const configuredValue = process.env.OPTICODDS_DEFAULT_SPORTS
     || process.env.OPTICODDS_SPORTS
@@ -668,7 +698,7 @@ function configuredSports() {
     || 'cricket,soccer';
 
   const sports = csv(configuredValue, ['cricket', 'soccer'])
-    .map((item) => item.toLowerCase())
+    .map(normalizeSportKey)
     .filter(Boolean);
 
   if (sports.some((item) => ['all', 'active', '*', 'all_sports', 'allsports'].includes(item))) {
@@ -676,6 +706,60 @@ function configuredSports() {
   }
 
   return sports;
+}
+
+function configuredAllSportsFallback() {
+  return csv(
+    process.env.OPTICODDS_ALL_SPORTS_LIST || process.env.OPTICODDS_ALL_SPORT_KEYS || '',
+    DEFAULT_ALL_SPORTS_LIST
+  )
+    .map(normalizeSportKey)
+    .filter(Boolean)
+    .filter((sport, index, all) => all.indexOf(sport) === index);
+}
+
+function sportKeyFromDiscoveryRow(row = {}) {
+  const raw = firstString(
+    row.key,
+    row.id,
+    row.sport,
+    row.sport_key,
+    row.sportKey,
+    row.slug,
+    row.name,
+    row.title
+  );
+  return normalizeSportKey(raw);
+}
+
+async function discoverOpticOddsSports() {
+  const maxSports = Math.max(1, Number(process.env.OPTICODDS_MAX_SPORTS || 30));
+  const fallback = configuredAllSportsFallback().slice(0, maxSports);
+
+  if (bool(process.env.OPTICODDS_DISABLE_SPORTS_DISCOVERY, false)) {
+    return fallback;
+  }
+
+  try {
+    const paths = csv(process.env.OPTICODDS_SPORTS_PATH || '', ['/sports']);
+    const result = await fetchFirstWorkingJson(paths, {}, '', '');
+    const discovered = dataArray(result.payload)
+      .map(sportKeyFromDiscoveryRow)
+      .filter(Boolean)
+      .filter((sport, index, all) => all.indexOf(sport) === index)
+      .filter((sport) => !/outright|future|winner/i.test(sport))
+      .slice(0, maxSports);
+
+    return discovered.length ? discovered : fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+async function resolveSportsForSync() {
+  const sports = configuredSports();
+  if (!sports.some(isAllSportsMode)) return sports;
+  return discoverOpticOddsSports();
 }
 
 function isAllSportsMode(sport = '') {
@@ -794,7 +878,7 @@ export async function syncOpticOddsOdds({ force = false } = {}) {
   if (!opticOddsProviderConfigured()) return { skipped: true, reason: 'OPTICODDS_API_KEY missing' };
 
   const startedAt = new Date();
-  const sports = configuredSports();
+  const sports = await resolveSportsForSync();
   const stats = { mode: 'opticodds_snapshot', sports: sports.length, events: 0, markets: 0, skippedSports: [], errors: [] };
 
   for (const sport of sports) {
@@ -838,7 +922,7 @@ export async function syncOpticOddsScores({ force = false } = {}) {
   if (!opticOddsProviderConfigured()) return { skipped: true, reason: 'OPTICODDS_API_KEY missing' };
 
   const startedAt = new Date();
-  const sports = configuredSports();
+  const sports = await resolveSportsForSync();
   const stats = { mode: 'opticodds_results_snapshot', sports: sports.length, events: 0, live: 0, finished: 0, skippedSports: [], errors: [] };
 
   for (const sport of sports) {
