@@ -267,7 +267,26 @@ async function fetchFirstWorkingStream(paths = [], params = {}, sport = '', cach
 
 function firstString(...values) {
   for (const value of values) {
-    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      const text = String(value).trim();
+      if (text) return text;
+      continue;
+    }
+    if (typeof value === 'object') {
+      const text = String(
+        value.id
+        || value.key
+        || value.name
+        || value.title
+        || value.display_name
+        || value.displayName
+        || value.full_name
+        || value.fullName
+        || ''
+      ).trim();
+      if (text) return text;
+    }
   }
   return '';
 }
@@ -314,15 +333,24 @@ function eventIdFrom(item = {}) {
 }
 
 function sportFrom(item = {}, fallback = '') {
-  return firstString(
+  return normalizeSportKey(firstString(
+    item.sport?.id,
+    item.sport?.key,
+    item.sport?.name,
     item.sport,
     item.sport_key,
     item.sportKey,
+    item.fixture?.sport?.id,
+    item.fixture?.sport?.key,
+    item.fixture?.sport?.name,
     item.fixture?.sport,
+    item.league?.sport?.id,
+    item.league?.sport?.key,
+    item.league?.sport?.name,
     item.league?.sport,
     fallback,
     'sports'
-  ).toLowerCase().replace(/\s+/g, '_');
+  ));
 }
 
 function titleCase(value = '') {
@@ -342,16 +370,24 @@ function sideNameFromParticipant(participants = [], side = 'home') {
 }
 
 function homeNameFrom(item = {}) {
+  const homeCompetitors = arrayFrom(item.home_competitors, item.homeCompetitors, item.fixture?.home_competitors, item.fixture?.homeCompetitors);
   const participants = arrayFrom(item.participants, item.competitors, item.teams, item.fixture?.participants, item.fixture?.competitors);
   return firstString(
+    item.home_team_display,
+    item.homeTeamDisplay,
     item.home_team,
     item.homeTeam,
     item.home?.name,
     item.home?.display_name,
     item.teams?.home?.name,
+    item.fixture?.home_team_display,
+    item.fixture?.homeTeamDisplay,
     item.fixture?.home_team,
     item.fixture?.homeTeam,
     item.fixture?.home?.name,
+    homeCompetitors[0]?.name,
+    homeCompetitors[0]?.display_name,
+    homeCompetitors[0]?.team?.name,
     sideNameFromParticipant(participants, 'home'),
     participants[0]?.name,
     participants[0]?.team?.name,
@@ -360,16 +396,24 @@ function homeNameFrom(item = {}) {
 }
 
 function awayNameFrom(item = {}) {
+  const awayCompetitors = arrayFrom(item.away_competitors, item.awayCompetitors, item.fixture?.away_competitors, item.fixture?.awayCompetitors);
   const participants = arrayFrom(item.participants, item.competitors, item.teams, item.fixture?.participants, item.fixture?.competitors);
   return firstString(
+    item.away_team_display,
+    item.awayTeamDisplay,
     item.away_team,
     item.awayTeam,
     item.away?.name,
     item.away?.display_name,
     item.teams?.away?.name,
+    item.fixture?.away_team_display,
+    item.fixture?.awayTeamDisplay,
     item.fixture?.away_team,
     item.fixture?.awayTeam,
     item.fixture?.away?.name,
+    awayCompetitors[0]?.name,
+    awayCompetitors[0]?.display_name,
+    awayCompetitors[0]?.team?.name,
     sideNameFromParticipant(participants, 'away'),
     participants[1]?.name,
     participants[1]?.team?.name,
@@ -379,13 +423,18 @@ function awayNameFrom(item = {}) {
 
 function leagueFrom(item = {}) {
   return firstString(
+    item.league?.name,
+    item.league?.id,
     item.league,
     item.league_name,
     item.leagueName,
+    item.competition?.name,
     item.competition,
+    item.tournament?.name,
     item.tournament,
-    item.fixture?.league,
     item.fixture?.league?.name,
+    item.fixture?.league?.id,
+    item.fixture?.league,
     item.sport_title,
     item.sportTitle,
     ''
@@ -428,6 +477,37 @@ function scoreDisplay(score = 0, wickets = null, overs = '') {
 
 function scoreSideFromRows(item = {}, homeTeam = '', awayTeam = '') {
   const scores = [];
+  const opticScores = item.result?.scores || item.fixture?.result?.scores || null;
+
+  if (opticScores?.home || opticScores?.away) {
+    const home = opticScores.home || {};
+    const away = opticScores.away || {};
+    const homeTotal = home.total ?? home.score ?? home.points ?? home.goals ?? home.runs ?? 0;
+    const awayTotal = away.total ?? away.score ?? away.points ?? away.goals ?? away.runs ?? 0;
+    const homeClock = item.result?.in_play_data?.clock || item.in_play_data?.clock || '';
+    const awayClock = item.result?.in_play_data?.clock || item.in_play_data?.clock || '';
+
+    scores.push({
+      side: 'home',
+      name: homeTeam,
+      score: numberFrom(homeTotal, 0),
+      label: homeTeam,
+      display: String(homeTotal ?? 0),
+      periods: home.periods || {},
+      clock: homeClock,
+    });
+    scores.push({
+      side: 'away',
+      name: awayTeam,
+      score: numberFrom(awayTotal, 0),
+      label: awayTeam,
+      display: String(awayTotal ?? 0),
+      periods: away.periods || {},
+      clock: awayClock,
+    });
+    return scores;
+  }
+
   const homeScore = item.home_score ?? item.homeScore ?? item.score?.home ?? item.scores?.home ?? item.result?.home;
   const awayScore = item.away_score ?? item.awayScore ?? item.score?.away ?? item.scores?.away ?? item.result?.away;
 
@@ -637,6 +717,11 @@ async function upsertOpticEvent(fixture = {}) {
         status: eventData.status,
         completed: eventData.completed,
         scores: eventData.scores,
+        score: {
+          home: eventData.scores.find((item) => item.side === 'home')?.display || String(eventData.scores.find((item) => item.side === 'home')?.score ?? 0),
+          away: eventData.scores.find((item) => item.side === 'away')?.display || String(eventData.scores.find((item) => item.side === 'away')?.score ?? 0),
+        },
+        scoreSource: PROVIDER,
         lastProviderUpdate: new Date(),
         lastScoreUpdate: eventData.scores.length ? new Date() : undefined,
         raw: {
@@ -773,14 +858,19 @@ function sportForFixture(fixture = {}, configuredSport = '') {
 }
 
 function activeFixtureParams(sport = '') {
-  return {
-    sport,
-    sports: sport,
-    sportsbook: preferredSportsbooks().join(','),
-    sportsbooks: preferredSportsbooks().join(','),
-    market: process.env.OPTICODDS_DEFAULT_MARKETS || process.env.SPORTS_DEFAULT_MARKETS || 'moneyline',
-    markets: process.env.OPTICODDS_DEFAULT_MARKETS || process.env.SPORTS_DEFAULT_MARKETS || 'moneyline',
-  };
+  const params = {};
+  if (sport) params.sport = sport;
+
+  // Keep /fixtures/active broad. Sportsbook/market filters can make OpticOdds
+  // return zero fixtures even when active fixtures exist. Filter odds at the
+  // stream/market stage instead.
+  if (bool(process.env.OPTICODDS_ACTIVE_LIVE_ONLY, false)) params.is_live = 'true';
+  if (process.env.OPTICODDS_ACTIVE_LEAGUE) params.league = process.env.OPTICODDS_ACTIVE_LEAGUE;
+  if (process.env.OPTICODDS_ACTIVE_TOURNAMENT_ID) params.tournament_id = process.env.OPTICODDS_ACTIVE_TOURNAMENT_ID;
+  if (process.env.OPTICODDS_ACTIVE_TEAM_ID) params.team_id = process.env.OPTICODDS_ACTIVE_TEAM_ID;
+  if (process.env.OPTICODDS_ACTIVE_FIXTURE_ID) params.id = process.env.OPTICODDS_ACTIVE_FIXTURE_ID;
+
+  return params;
 }
 
 function streamParams(fixture = {}, sport = '') {
