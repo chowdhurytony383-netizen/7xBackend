@@ -899,12 +899,28 @@ export const eventDetails = asyncHandler(async (req, res) => {
   const event = await SportsAutoEvent.findById(req.params.eventId).lean();
   if (!event) throw new AppError('Sports event not found', 404);
 
-  const [market, details] = await Promise.all([
-    SportsAutoMarket.findOne({ event: event._id }).sort({ updatedAt: -1 }).lean(),
+  const [market, allMarkets, details] = await Promise.all([
+    SportsAutoMarket.findOne({ event: event._id, status: 'OPEN' }).sort({ updatedAt: -1 }).lean(),
+    SportsAutoMarket.find({
+      event: event._id,
+      status: 'OPEN',
+      selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
+    }).sort({ marketDisplayName: 1, marketName: 1, updatedAt: -1 }).lean(),
     getSportsMatchDetails(event),
   ]);
 
-  const refreshedEvent = await refreshEventScoresFromDetails(event, details);
+  const enrichedDetails = details ? {
+    ...details,
+    // Production sportsbook UI must use DB-normalized selections so every visible
+    // provider market can be sent back to the betting engine with the exact
+    // selectionId/marketKey used during sync. Raw OpticOdds odds remain available
+    // in details.odds/raw when coverage exists, but DB markets are the bet-safe
+    // source of truth for clickable bet buttons.
+    markets: allMarkets?.length ? allMarkets : details.markets,
+    dbMarkets: allMarkets || [],
+  } : details;
+
+  const refreshedEvent = await refreshEventScoresFromDetails(event, enrichedDetails);
   if (refreshedEvent && String(refreshedEvent._id || '') === String(event._id || '')) {
     invalidateSportsResponseCaches();
   }
@@ -912,10 +928,10 @@ export const eventDetails = asyncHandler(async (req, res) => {
   const formattedEvent = formatAutoEventFromMarket(refreshedEvent || event, market);
   res.json({
     success: true,
-    data: { event: formattedEvent, market, details },
+    data: { event: formattedEvent, market, details: enrichedDetails },
     event: formattedEvent,
     market,
-    details,
+    details: enrichedDetails,
   });
 });
 
