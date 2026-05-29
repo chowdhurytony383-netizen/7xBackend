@@ -12,11 +12,13 @@ import {
   settleNow,
   syncNow,
   syncStatus,
+  sportsOverview,
 } from '../controllers/sportsController.js';
 import { protect, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
+router.get('/overview', sportsOverview);
 router.get('/categories', categories);
 router.get('/live', liveMatches);
 router.get('/matches', liveMatches);
