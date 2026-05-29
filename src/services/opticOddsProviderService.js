@@ -295,6 +295,41 @@ function numberFrom(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+
+function scoreText(value, fallback = '0') {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    const text = String(value).trim();
+    return text && text !== '[object Object]' ? text : fallback;
+  }
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => scoreText(item, '')).filter(Boolean);
+    return parts.length ? parts.join(' · ') : fallback;
+  }
+  if (typeof value === 'object') {
+    const runs = value.runs ?? value.run ?? value.score ?? value.total ?? value.value ?? value.points ?? value.goals;
+    const wickets = value.wickets ?? value.wkts ?? value.outs;
+    const overs = value.overs ?? value.over;
+    if (runs !== undefined && runs !== null && runs !== value) {
+      return `${scoreText(runs, '0')}${wickets !== undefined && wickets !== null && wickets !== '' ? `/${wickets}` : ''}${overs !== undefined && overs !== null && overs !== '' ? ` (${overs} ov)` : ''}`;
+    }
+    const nested = value.total_score ?? value.totalScore ?? value.current ?? value.current_score ?? value.currentScore ?? value.score;
+    if (nested && typeof nested === 'object' && nested !== value) {
+      const text = scoreText(nested, '');
+      if (text) return text;
+    }
+    const display = value.display ?? value.displayName ?? value.formatted ?? value.label ?? value.description ?? value.name;
+    if (display !== undefined && display !== null && display !== value) {
+      const text = String(display).trim();
+      if (text && text !== '[object Object]') return text;
+    }
+    const home = value.home ?? value.homeScore ?? value.localteam_score ?? value.scores?.home;
+    const away = value.away ?? value.awayScore ?? value.visitorteam_score ?? value.scores?.away;
+    if (home !== undefined || away !== undefined) return `${scoreText(home, '0')} - ${scoreText(away, '0')}`;
+  }
+  return fallback;
+}
+
 function arrayFrom(...values) {
   for (const value of values) {
     if (Array.isArray(value)) return value;
@@ -525,10 +560,11 @@ function normalizeStatus(value = '', item = {}) {
 }
 
 function scoreDisplay(score = 0, wickets = null, overs = '') {
+  const base = scoreText(score, '0');
   if (wickets !== null && wickets !== undefined && wickets !== '') {
-    return `${numberFrom(score, 0)}/${wickets}${overs ? ` (${overs} ov)` : ''}`;
+    return `${base}/${wickets}${overs ? ` (${overs} ov)` : ''}`;
   }
-  return String(score ?? 0);
+  return base;
 }
 
 function scoreSideFromRows(item = {}, homeTeam = '', awayTeam = '') {
@@ -537,8 +573,8 @@ function scoreSideFromRows(item = {}, homeTeam = '', awayTeam = '') {
   const awayScore = item.away_score ?? item.awayScore ?? item.score?.away ?? item.scores?.away ?? item.result?.away;
 
   if (homeScore !== undefined || awayScore !== undefined) {
-    scores.push({ side: 'home', name: homeTeam, score: numberFrom(homeScore, 0), display: String(homeScore ?? 0) });
-    scores.push({ side: 'away', name: awayTeam, score: numberFrom(awayScore, 0), display: String(awayScore ?? 0) });
+    scores.push({ side: 'home', name: homeTeam, score: numberFrom(homeScore?.runs ?? homeScore?.score ?? homeScore?.total ?? homeScore, 0), display: scoreText(homeScore, '0'), raw: homeScore });
+    scores.push({ side: 'away', name: awayTeam, score: numberFrom(awayScore?.runs ?? awayScore?.score ?? awayScore?.total ?? awayScore, 0), display: scoreText(awayScore, '0'), raw: awayScore });
     return scores;
   }
 
@@ -555,7 +591,7 @@ function scoreSideFromRows(item = {}, homeTeam = '', awayTeam = '') {
       overs: row.overs ? String(row.overs) : '',
       inning: row.inning ?? row.period ?? null,
       label: row.label || name,
-      display: row.display || row.formatted || scoreDisplay(score, row.wickets ?? null, row.overs ? String(row.overs) : ''),
+      display: row.display || row.formatted || scoreDisplay(score, row.wickets ?? row.wkts ?? null, row.overs ? String(row.overs) : ''),
     });
   });
 
@@ -1156,7 +1192,7 @@ export async function getOpticOddsFullDetailsForEvent(event = {}) {
       raw: fixture.away_competitors?.[0] || null,
     },
     scores: scoreRows.length ? scoreRows : scoreData,
-    resultInfo: scoreRows.length >= 2 ? `${scoreRows[0].display ?? scoreRows[0].score ?? 0} - ${scoreRows[1].display ?? scoreRows[1].score ?? 0}` : '',
+    resultInfo: scoreRows.length >= 2 ? `${scoreText(scoreRows[0].display ?? scoreRows[0].score ?? scoreRows[0], '0')} - ${scoreText(scoreRows[1].display ?? scoreRows[1].score ?? scoreRows[1], '0')}` : '',
     events: resultsRow.events || resultsRow.play_by_play || [],
     statistics: resultsRow.stats || resultsRow.statistics || [],
     lineups: fixture.lineups || resultsRow.lineups || [],

@@ -55,37 +55,68 @@ function canUseTheOddsApiBasicDetails(event = {}) {
   return (provider === 'theoddsapi' || detailsProviders.includes('theoddsapi')) && oddsProviderConfigured();
 }
 
+
+function firstScoreField(value = {}, fields = []) {
+  for (const field of fields) {
+    if (value?.[field] !== undefined && value?.[field] !== null && value?.[field] !== '') return value[field];
+  }
+  return undefined;
+}
+
+function scoreText(value, fallback = '0') {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    const text = String(value).trim();
+    return text && text !== '[object Object]' ? text : fallback;
+  }
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => scoreText(item, '')).filter(Boolean);
+    return parts.length ? parts.join(' · ') : fallback;
+  }
+  if (typeof value === 'object') {
+    const runs = firstScoreField(value, ['runs', 'run', 'score', 'total', 'value', 'points', 'goals']);
+    const wickets = firstScoreField(value, ['wickets', 'wkts', 'outs']);
+    const overs = firstScoreField(value, ['overs', 'over']);
+    if (runs !== undefined && runs !== value) {
+      const base = scoreText(runs, '0');
+      return `${base}${wickets !== undefined ? `/${wickets}` : ''}${overs !== undefined && overs !== '' ? ` (${overs} ov)` : ''}`;
+    }
+    const nested = value.total_score ?? value.totalScore ?? value.current ?? value.current_score ?? value.currentScore ?? value.score;
+    if (nested && typeof nested === 'object' && nested !== value) {
+      const text = scoreText(nested, '');
+      if (text) return text;
+    }
+    const display = firstScoreField(value, ['display', 'displayName', 'formatted', 'label', 'description', 'name']);
+    if (display !== undefined && display !== value) {
+      const text = String(display).trim();
+      if (text && text !== '[object Object]') return text;
+    }
+    const home = value.home ?? value.homeScore ?? value.localteam_score ?? value.scores?.home;
+    const away = value.away ?? value.awayScore ?? value.visitorteam_score ?? value.scores?.away;
+    if (home !== undefined || away !== undefined) return `${scoreText(home, '0')} - ${scoreText(away, '0')}`;
+  }
+  return fallback;
+}
+
 function normalizeScoreSide(value, side = '') {
   if (value === undefined || value === null || value === '') return null;
 
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return {
-      side,
-      score: Number.isFinite(Number(value)) ? Number(value) : value,
-      display: String(value),
-    };
-  }
+  const display = scoreText(value, '0');
+  const source = value && typeof value === 'object' ? value : {};
+  const total = typeof value === 'object'
+    ? firstScoreField(source, ['runs', 'score', 'total', 'value', 'points', 'goals'])
+    : value;
 
-  if (typeof value === 'object') {
-    const total = value.total ?? value.score ?? value.value ?? value.points ?? value.goals ?? value.runs ?? 0;
-    const display = value.display
-      || value.formatted
-      || (value.wickets !== undefined && value.wickets !== null
-        ? `${total}/${value.wickets}${value.overs ? ` (${value.overs} ov)` : ''}`
-        : String(total ?? 0));
-    return {
-      side,
-      score: Number.isFinite(Number(total)) ? Number(total) : total,
-      display,
-      total,
-      wickets: value.wickets ?? null,
-      overs: value.overs ?? '',
-      periods: value.periods || value.period_scores || null,
-      raw: value,
-    };
-  }
-
-  return null;
+  return {
+    side,
+    score: Number.isFinite(Number(total)) ? Number(total) : total,
+    display,
+    total,
+    wickets: source.wickets ?? source.wkts ?? null,
+    overs: source.overs ?? source.over ?? '',
+    periods: source.periods || source.period_scores || null,
+    raw: value,
+  };
 }
 
 function scoresFromEvent(event = {}) {
@@ -167,7 +198,7 @@ function basicDetailsFromEvent(event = {}, provider = 'opticodds') {
       raw: raw.away_competitors?.[0] || null,
     },
     scores: scores.length ? scores : null,
-    resultInfo: scores.length >= 2 ? `${scores[0].display ?? scores[0].score ?? 0} - ${scores[1].display ?? scores[1].score ?? 0}` : '',
+    resultInfo: scores.length >= 2 ? `${scoreText(scores[0].display ?? scores[0].score ?? scores[0], '0')} - ${scoreText(scores[1].display ?? scores[1].score ?? scores[1], '0')}` : '',
     events: [],
     statistics: raw.stats || rawResult.stats || [],
     lineups: raw.lineups || rawResult.lineups || [],
