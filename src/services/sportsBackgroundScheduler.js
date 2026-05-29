@@ -1,6 +1,7 @@
 import { env } from '../config/env.js';
 import { syncSportsAll, syncSportsScores } from './freeSportsProviderService.js';
 import { settleOpenSportsBets } from './sportsBettingService.js';
+import { startOpticOddsLiveScoreService, stopOpticOddsLiveScoreService } from './opticOddsLiveScoreStreamService.js';
 
 let schedulerStarted = false;
 let syncTimer = null;
@@ -76,6 +77,10 @@ export function startSportsBackgroundScheduler() {
   syncTimer.unref?.();
   settlementTimer.unref?.();
 
+  startOpticOddsLiveScoreService().catch((error) => {
+    console.warn('[sports] opticodds live score service failed to start:', error?.message || error);
+  });
+
   console.log(`[sports] background scheduler active. sync=${Math.round(syncEveryMs / 1000)}s settlement=${Math.round(settlementEveryMs / 1000)}s`);
   return true;
 }
@@ -83,6 +88,7 @@ export function startSportsBackgroundScheduler() {
 export function stopSportsBackgroundScheduler() {
   if (syncTimer) clearInterval(syncTimer);
   if (settlementTimer) clearInterval(settlementTimer);
+  stopOpticOddsLiveScoreService();
   syncTimer = null;
   settlementTimer = null;
   schedulerStarted = false;
