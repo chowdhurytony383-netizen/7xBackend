@@ -1133,12 +1133,18 @@ export async function getOpticOddsFullDetailsForEvent(event = {}) {
     sportsbook: books,
   };
 
-  const [fixtureCall, oddsCall, resultsCall, playerResultsCall, marketsCall] = await Promise.all([
+  const [fixtureCall, oddsCall, resultsCall, playerResultsCall, marketsCall, leaguesCall, marketsCatalogCall, futuresCall, futuresOddsCall, playersCall, teamsCall] = await Promise.all([
     safeOpticDetailsCall('fixture', '/fixtures/active', { id: [fixtureId] }, sport),
     safeOpticDetailsCall('odds', process.env.OPTICODDS_ODDS_PATH || '/fixtures/odds', oddsParams, sport),
     safeOpticDetailsCall('results', process.env.OPTICODDS_RESULTS_PATH || '/fixtures/results', resultParams, sport),
     safeOpticDetailsCall('playerResults', '/fixtures/player-results', resultParams, sport),
     safeOpticDetailsCall('activeMarkets', '/markets/active', marketParams, sport),
+    safeOpticDetailsCall('leagues', '/leagues', { sport }, sport),
+    safeOpticDetailsCall('marketsCatalog', '/markets', { sport }, sport),
+    safeOpticDetailsCall('futures', '/futures', { sport }, sport),
+    safeOpticDetailsCall('futuresOdds', '/futures/odds', { sport, sportsbook: books, odds_format: 'DECIMAL' }, sport),
+    safeOpticDetailsCall('players', '/players', { sport }, sport),
+    safeOpticDetailsCall('teams', '/teams', { sport }, sport),
   ]);
 
   const squadCalls = await Promise.all(teamIds.slice(0, 2).map((teamId) => safeOpticDetailsCall(`squad:${teamId}`, '/squads', { team_id: teamId }, sport)));
@@ -1196,11 +1202,17 @@ export async function getOpticOddsFullDetailsForEvent(event = {}) {
     events: resultsRow.events || resultsRow.play_by_play || [],
     statistics: resultsRow.stats || resultsRow.statistics || [],
     lineups: fixture.lineups || resultsRow.lineups || [],
-    players: playerResultsCall.data || [],
+    players: playerResultsCall.data?.length ? playerResultsCall.data : (playersCall.data || []),
+    playerResults: playerResultsCall.data || [],
     standings: [],
+    leagues: leaguesCall.data || [],
+    teamsCatalog: teamsCall.data || [],
+    marketsCatalog: marketsCatalogCall.data || [],
     markets: Array.from(rawMarkets.values()),
     odds: rawOdds,
     activeMarkets: marketsCall.data || [],
+    futures: futuresCall.data || [],
+    futuresOdds: futuresOddsCall.data || [],
     injuries: injuriesCall.data || [],
     squads: squadCalls.flatMap((call) => call.data || []),
     raw: {
@@ -1209,6 +1221,12 @@ export async function getOpticOddsFullDetailsForEvent(event = {}) {
       results: resultsCall,
       playerResults: playerResultsCall,
       activeMarkets: marketsCall,
+      leagues: leaguesCall,
+      marketsCatalog: marketsCatalogCall,
+      futures: futuresCall,
+      futuresOdds: futuresOddsCall,
+      players: playersCall,
+      teams: teamsCall,
       squads: squadCalls,
       injuries: injuriesCall,
       providerEvent: event.raw || {},
