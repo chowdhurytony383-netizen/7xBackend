@@ -63,7 +63,7 @@ function getTheOddsApiBasicDetails(event = {}) {
     enabled: true,
     provider: 'theoddsapi',
     available: true,
-    message: 'Basic match details from The Odds API. Detailed stats/lineups need Sportmonks or API-SPORTS details access.',
+    message: 'Basic match details are available from the sports feed. Full stats, lineups and commentary require an enabled details provider for this sport.',
     fixtureId: event.providerEventId || raw.id || '',
     sport: event.sportTitle || raw.sport_title || event.sportKey || '',
     league: event.league || raw.sport_title || '',
@@ -144,7 +144,7 @@ export async function getSportsMatchDetails(event = {}) {
     enabled: true,
     provider: providerList().join(',') || 'details',
     available: false,
-    message: 'No configured details provider supports this sport/match yet. Real odds can still come from The Odds API; full match stats/lineups need Sportmonks or API-SPORTS details coverage.',
+    message: 'Real OpticOdds markets are available for this match. Full match stats, lineups and commentary are not available from the current details provider yet.',
     raw: {
       sportKey: event.sportKey,
       sportTitle: event.sportTitle,
