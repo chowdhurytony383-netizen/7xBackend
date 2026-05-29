@@ -455,7 +455,23 @@ function safeScoreString(value, fallback = '') {
 
 function scoreDisplayValue(event, teamName, side = '') {
   const found = scoreEntryForTeam(event, teamName, side);
-  if (!found) return '0';
+
+  if (!found) {
+    const normalizedSide = String(side || '').toLowerCase();
+    const score = event?.score || event?.raw?.score || {};
+    const scores = event?.raw?.scores || event?.rawResult?.scores || {};
+    const resultScores = event?.raw?.result?.scores || event?.rawResult?.result?.scores || {};
+
+    const fallback = normalizedSide === 'home'
+      ? score.home ?? score.homeScore ?? scores.home ?? scores.homeScore ?? resultScores.home ?? resultScores.homeScore
+      : score.away ?? score.awayScore ?? scores.away ?? scores.awayScore ?? resultScores.away ?? resultScores.awayScore;
+
+    if (fallback !== undefined && fallback !== null && fallback !== '') {
+      return safeScoreString(fallback, '0');
+    }
+
+    return '0';
+  }
 
   const direct = found.display
     ?? found.value
