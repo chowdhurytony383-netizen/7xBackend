@@ -91,7 +91,13 @@ export async function initRealtimeSockets(server) {
     });
 
     socket.join('crash');
+    socket.join('sports');
     socket.emit('crash:state', await crashEngine.stateForUser(user?._id));
+
+    socket.on('sports:join', (_payload = {}, ack) => {
+      socket.join('sports');
+      safeAck(ack, { success: true });
+    });
 
     socket.on('crash:join', async (_payload, ack) => {
       safeAck(ack, await crashEngine.stateForUser(socket.user?._id));
