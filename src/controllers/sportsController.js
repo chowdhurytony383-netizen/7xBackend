@@ -412,6 +412,19 @@ function scoreEntryForTeam(event, teamName, side = '') {
   }) || null;
 }
 
+function numericLike(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function firstScoreField(value = {}, fields = []) {
+  for (const field of fields) {
+    if (value?.[field] !== undefined && value?.[field] !== null && value?.[field] !== '') return value[field];
+  }
+  return undefined;
+}
+
 function safeScoreString(value, fallback = '') {
   if (value === undefined || value === null || value === '') return fallback;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
@@ -425,29 +438,39 @@ function safeScoreString(value, fallback = '') {
   }
 
   if (typeof value === 'object') {
-    const direct = value.display
-      ?? value.displayName
-      ?? value.value
-      ?? value.total
-      ?? value.runs
-      ?? value.points
-      ?? value.goals
-      ?? value.score;
+    const cricketRuns = firstScoreField(value, ['runs', 'run', 'score', 'total', 'value', 'points', 'goals']);
+    const wickets = firstScoreField(value, ['wickets', 'wkts', 'outs']);
+    const overs = firstScoreField(value, ['overs', 'over']);
 
-    if (direct !== undefined && direct !== null && direct !== value) {
-      const base = safeScoreString(direct, '');
-      if (base) {
-        const wickets = value.wickets !== undefined && value.wickets !== null && value.wickets !== '' ? `/${value.wickets}` : '';
-        const overs = value.overs ? ` (${value.overs} ov)` : '';
-        return `${base}${wickets}${overs}`;
-      }
+    if (cricketRuns !== undefined && cricketRuns !== value) {
+      const base = safeScoreString(cricketRuns, '0');
+      const wicketText = wickets !== undefined ? `/${wickets}` : '';
+      const oversText = overs !== undefined && overs !== '' ? ` (${overs} ov)` : '';
+      return `${base}${wicketText}${oversText}`;
     }
 
-    const home = value.home ?? value.homeScore ?? value.scores?.home;
-    const away = value.away ?? value.awayScore ?? value.scores?.away;
+    const nestedTotal = value.total_score ?? value.totalScore ?? value.current ?? value.current_score ?? value.currentScore ?? value.score;
+    if (nestedTotal && typeof nestedTotal === 'object' && nestedTotal !== value) {
+      const nestedText = safeScoreString(nestedTotal, '');
+      if (nestedText) return nestedText;
+    }
+
+    const directText = firstScoreField(value, ['display', 'displayName', 'formatted', 'label', 'description', 'name']);
+    if (directText !== undefined && directText !== value) {
+      const text = String(directText).trim();
+      if (text && text !== '[object Object]') return text;
+    }
+
+    const home = value.home ?? value.homeScore ?? value.localteam_score ?? value.scores?.home;
+    const away = value.away ?? value.awayScore ?? value.visitorteam_score ?? value.scores?.away;
     if (home !== undefined || away !== undefined) {
       return `${safeScoreString(home, '0')} - ${safeScoreString(away, '0')}`;
     }
+
+    const totals = Object.values(value)
+      .map((entry) => (entry && typeof entry === 'object' ? safeScoreString(entry, '') : ''))
+      .filter(Boolean);
+    if (totals.length) return totals.join(' · ');
   }
 
   return fallback;
