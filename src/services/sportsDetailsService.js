@@ -2,7 +2,7 @@ import { getSportmonksMatchDetails } from './sportmonksDetailsService.js';
 import { getSportmonksCricketMatchDetails, sportmonksCricketConfigured } from './sportmonksCricketService.js';
 import { sportmonksFootballConfigured as sportmonksFootballProviderConfigured } from './sportmonksFootballService.js';
 import { apiSportsProviderConfigured, apiSportsSupportsEvent, getApiSportsMatchDetails } from './apisportsDetailsService.js';
-import { opticOddsProviderConfigured } from './opticOddsProviderService.js';
+import { getOpticOddsFullDetailsForEvent, opticOddsProviderConfigured } from './opticOddsProviderService.js';
 
 function boolEnv(name, fallback = false) {
   const value = process.env[name];
@@ -232,7 +232,11 @@ export async function getSportsMatchDetails(event = {}) {
     if (!canUseSportmonksCricket && !canUseSportmonksFootball && !canUseTheOddsApi && !canUseOpticOdds) return details;
   }
 
-  if (canUseOpticOdds) return basicDetailsFromEvent(event, 'opticodds');
+  if (canUseOpticOdds) {
+    const fullDetails = await getOpticOddsFullDetailsForEvent(event);
+    if (fullDetails?.available) return fullDetails;
+    return basicDetailsFromEvent(event, 'opticodds');
+  }
   if (canUseTheOddsApi) return getTheOddsApiBasicDetails(event);
 
   return {
