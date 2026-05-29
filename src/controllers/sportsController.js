@@ -412,13 +412,60 @@ function scoreEntryForTeam(event, teamName, side = '') {
   }) || null;
 }
 
+function safeScoreString(value, fallback = '') {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    const text = String(value).trim();
+    return text && text !== '[object Object]' ? text : fallback;
+  }
+
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => safeScoreString(item, '')).filter(Boolean);
+    return parts.length ? parts.join(' · ') : fallback;
+  }
+
+  if (typeof value === 'object') {
+    const direct = value.display
+      ?? value.displayName
+      ?? value.value
+      ?? value.total
+      ?? value.runs
+      ?? value.points
+      ?? value.goals
+      ?? value.score;
+
+    if (direct !== undefined && direct !== null && direct !== value) {
+      const base = safeScoreString(direct, '');
+      if (base) {
+        const wickets = value.wickets !== undefined && value.wickets !== null && value.wickets !== '' ? `/${value.wickets}` : '';
+        const overs = value.overs ? ` (${value.overs} ov)` : '';
+        return `${base}${wickets}${overs}`;
+      }
+    }
+
+    const home = value.home ?? value.homeScore ?? value.scores?.home;
+    const away = value.away ?? value.awayScore ?? value.scores?.away;
+    if (home !== undefined || away !== undefined) {
+      return `${safeScoreString(home, '0')} - ${safeScoreString(away, '0')}`;
+    }
+  }
+
+  return fallback;
+}
+
 function scoreDisplayValue(event, teamName, side = '') {
   const found = scoreEntryForTeam(event, teamName, side);
-  if (!found) return 0;
-  if (found.display !== undefined && found.display !== null && found.display !== '') return found.display;
+  if (!found) return '0';
 
-  const score = Number(found.score || 0);
-  const scoreText = Number.isFinite(score) ? String(score) : String(found.score || 0);
+  const direct = found.display
+    ?? found.value
+    ?? found.total
+    ?? found.runs
+    ?? found.points
+    ?? found.goals
+    ?? found.score;
+
+  const scoreText = safeScoreString(direct, '0');
   const wickets = found.wickets !== undefined && found.wickets !== null && found.wickets !== '' ? `/${found.wickets}` : '';
   const overs = found.overs ? ` (${found.overs} ov)` : '';
   return `${scoreText}${wickets}${overs}`;
