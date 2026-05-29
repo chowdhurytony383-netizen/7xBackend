@@ -5,6 +5,8 @@ import {
   liveMatches,
   matchOfTheDay,
   myBets,
+  opticOddsCoverage,
+  opticOddsCoverageSection,
   placeBet,
   placeMultipleBets,
   settleNow,
@@ -22,6 +24,8 @@ router.get('/live-matches', liveMatches);
 router.get('/match-of-the-day', matchOfTheDay);
 router.get('/events/:eventId', eventDetails);
 router.get('/sync-status', syncStatus);
+router.get('/opticodds/coverage', opticOddsCoverage);
+router.get('/opticodds/coverage/:kind', opticOddsCoverageSection);
 
 router.post('/bets/place', protect, placeBet);
 router.post('/bets/place-multiple', protect, placeMultipleBets);
