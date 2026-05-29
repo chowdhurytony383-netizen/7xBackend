@@ -16,6 +16,7 @@ import { sportmonksCricketConfigured } from '../services/sportmonksCricketServic
 import { sportmonksFootballConfigured } from '../services/sportmonksFootballService.js';
 import { opticOddsProviderConfigured } from '../services/opticOddsProviderService.js';
 import { refreshEventScoresFromDetails } from '../services/sportsRealtimeMergeService.js';
+import { fetchOpticOddsCatalogSection, getOpticOddsCoverageCatalog } from '../services/opticOddsCatalogService.js';
 
 let backgroundSportsSyncPromise = null;
 let liveMatchesCache = { createdAt: 0, payload: null };
@@ -971,6 +972,30 @@ export const settleNow = asyncHandler(async (_req, res) => {
   const result = await settleOpenSportsBets({ force: true });
   invalidateSportsResponseCaches();
   res.json({ success: true, message: 'Sports settlement requested', data: result, result });
+});
+
+
+export const opticOddsCoverage = asyncHandler(async (req, res) => {
+  const options = {
+    sport: req.query.sport,
+    fixtureId: req.query.fixture_id || req.query.fixtureId,
+    teamId: req.query.team_id || req.query.teamId,
+    leagueId: req.query.league_id || req.query.leagueId,
+    sportsbooks: req.query.sportsbooks || req.query.sportsbook,
+  };
+  const result = await getOpticOddsCoverageCatalog(options);
+  res.json({ success: true, data: result, result });
+});
+
+export const opticOddsCoverageSection = asyncHandler(async (req, res) => {
+  const result = await fetchOpticOddsCatalogSection(req.params.kind, {
+    sport: req.query.sport,
+    fixtureId: req.query.fixture_id || req.query.fixtureId,
+    teamId: req.query.team_id || req.query.teamId,
+    leagueId: req.query.league_id || req.query.leagueId,
+    sportsbooks: req.query.sportsbooks || req.query.sportsbook,
+  });
+  res.json({ success: Boolean(result.ok !== false), data: result, result });
 });
 
 export const syncStatus = asyncHandler(async (_req, res) => {
