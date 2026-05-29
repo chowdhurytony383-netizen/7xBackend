@@ -22,6 +22,7 @@ let backgroundSportsSyncPromise = null;
 let liveMatchesCache = { createdAt: 0, payload: null };
 let categoriesCache = { createdAt: 0, payload: null };
 let matchOfTheDayCache = { createdAt: 0, payload: null };
+let sportsOverviewCache = { createdAt: 0, payload: null, cacheKey: '' };
 let lastBackgroundSettlementAt = 0;
 
 function cacheTtlMs(name, fallbackSeconds) {
@@ -173,6 +174,7 @@ function invalidateSportsResponseCaches() {
   liveMatchesCache = { createdAt: 0, payload: null };
   categoriesCache = { createdAt: 0, payload: null };
   matchOfTheDayCache = { createdAt: 0, payload: null };
+  sportsOverviewCache = { createdAt: 0, payload: null, cacheKey: '' };
 }
 
 function triggerBackgroundSportsSync(reason = 'request') {
@@ -800,12 +802,136 @@ export const categories = asyncHandler(async (_req, res) => {
   res.json(payload);
 });
 
-export const liveMatches = asyncHandler(async (req, res) => {
-  await maybeAutoSync({ wait: boolEnv('SPORTS_AUTO_SYNC_ON_REQUEST_BLOCKING', true) });
 
-  const ttl = cacheTtlMs('SPORTS_RESPONSE_CACHE_SECONDS', 6);
+function requestedLimit(req, fallback = 48, max = 200) {
+  const raw = Number(req?.query?.limit || req?.query?.max || fallback);
+  const value = Number.isFinite(raw) ? raw : fallback;
+  return Math.min(max, Math.max(1, value));
+}
+
+function normalizeStatusQuery(value = '') {
+  const clean = String(value || '').trim().toLowerCase().replace(/[^a-z]/g, '');
+  if (['live', 'inplay', 'running'].includes(clean)) return 'live';
+  if (['prematch', 'pre', 'upcoming', 'scheduled'].includes(clean)) return 'prematch';
+  if (['finished', 'completed'].includes(clean)) return 'finished';
+  return 'all';
+}
+
+function eventDisplayMode(event = {}) {
+  const status = strictDisplayStatus(event).toLowerCase();
+  if (status.includes('finish')) return 'finished';
+  if (status.includes('live')) return 'live';
+  return 'prematch';
+}
+
+function matchDisplayMode(match = {}) {
+  const status = String(match.status || strictDisplayStatus(match)).toLowerCase();
+  if (match.completed || status.includes('finish')) return 'finished';
+  if (status.includes('live')) return 'live';
+  return 'prematch';
+}
+
+function statusFilteredMatches(matches = [], statusQuery = 'all') {
+  if (!statusQuery || statusQuery === 'all') return matches;
+  return matches.filter((match) => matchDisplayMode(match) === statusQuery);
+}
+
+function requestedTimeWindowFilter(req = {}) {
+  const minutes = Number(req.query?.windowMinutes || req.query?.window || req.query?.within || 0);
+  if (!Number.isFinite(minutes) || minutes <= 0) return null;
+  return new Date(Date.now() + minutes * 60 * 1000);
+}
+
+async function providerMarketEventIds() {
+  return SportsAutoMarket.distinct('event', {
+    ...(shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter(sportsProviderName())),
+    status: 'OPEN',
+    selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
+  });
+}
+
+async function buildSportsOverviewPayload({ limit = 12 } = {}) {
+  const baseFilter = visibleEventFilter();
+  const events = await SportsAutoEvent.find(baseFilter)
+    .select('provider providerEventId sportKey sportTitle league homeTeam awayTeam commenceTime status scores score completed raw isActive lastProviderUpdate lastScoreUpdate updatedAt createdAt')
+    .sort({ status: 1, commenceTime: 1, updatedAt: -1 })
+    .limit(Number(process.env.SPORTS_OVERVIEW_SCAN_LIMIT || 1200))
+    .lean();
+
+  const sportsMap = new Map();
+  events.forEach((event) => {
+    const meta = categoryForEvent(event);
+    const current = sportsMap.get(meta.key) || { ...meta, count: 0, live: 0, prematch: 0, finished: 0 };
+    current.count += 1;
+    const mode = eventDisplayMode(event);
+    current[mode] = (current[mode] || 0) + 1;
+    sportsMap.set(meta.key, current);
+  });
+
+  const sortedSports = Array.from(sportsMap.values()).sort((a, b) => {
+    const priA = CATEGORY_META[a.key] ? Object.keys(CATEGORY_META).indexOf(a.key) : 999;
+    const priB = CATEGORY_META[b.key] ? Object.keys(CATEGORY_META).indexOf(b.key) : 999;
+    if (priA !== priB) return priA - priB;
+    return String(a.displayName || a.name).localeCompare(String(b.displayName || b.name));
+  });
+
+  const liveCandidates = events.filter((event) => eventDisplayMode(event) === 'live').slice(0, limit);
+  const prematchCandidates = events.filter((event) => eventDisplayMode(event) === 'prematch').slice(0, limit);
+  const [liveMatches, prematchMatches] = await Promise.all([
+    formatAutoEvents(liveCandidates),
+    formatAutoEvents(prematchCandidates),
+  ]);
+
+  return {
+    success: true,
+    data: {
+      provider: sportsProviderName(),
+      sports: sortedSports,
+      summary: {
+        sports: sortedSports.length,
+        events: events.length,
+        live: events.filter((event) => eventDisplayMode(event) === 'live').length,
+        prematch: events.filter((event) => eventDisplayMode(event) === 'prematch').length,
+        finished: events.filter((event) => eventDisplayMode(event) === 'finished').length,
+      },
+      topLive: liveMatches,
+      topPrematch: prematchMatches,
+    },
+    sports: sortedSports,
+    summary: {
+      sports: sortedSports.length,
+      events: events.length,
+      live: events.filter((event) => eventDisplayMode(event) === 'live').length,
+      prematch: events.filter((event) => eventDisplayMode(event) === 'prematch').length,
+      finished: events.filter((event) => eventDisplayMode(event) === 'finished').length,
+    },
+    topLive: liveMatches,
+    topPrematch: prematchMatches,
+    cached: false,
+  };
+}
+
+export const sportsOverview = asyncHandler(async (req, res) => {
+  maybeAutoSync();
+  const limit = requestedLimit(req, Number(process.env.SPORTS_HOME_MATCH_LIMIT || 12), 40);
+  const ttl = cacheTtlMs('SPORTS_OVERVIEW_CACHE_SECONDS', 12);
+  const cacheKey = `limit:${limit}`;
+  if (cacheFresh(sportsOverviewCache, ttl) && sportsOverviewCache.cacheKey === cacheKey) {
+    return res.json({ ...sportsOverviewCache.payload, cached: true });
+  }
+  const payload = await buildSportsOverviewPayload({ limit });
+  sportsOverviewCache = { createdAt: Date.now(), payload, cacheKey };
+  return res.json(payload);
+});
+
+export const liveMatches = asyncHandler(async (req, res) => {
+  await maybeAutoSync({ wait: boolEnv('SPORTS_AUTO_SYNC_ON_REQUEST_BLOCKING', false) });
+
+  const ttl = cacheTtlMs('SPORTS_RESPONSE_CACHE_SECONDS', 15);
   const sportQuery = String(req.query?.sport || req.query?.category || req.query?.categoryKey || '').trim().toLowerCase();
-  const cacheKey = sportQuery || 'all';
+  const statusQuery = normalizeStatusQuery(req.query?.status || req.query?.mode || 'all');
+  const limit = requestedLimit(req, Number(process.env.SPORTS_RESPONSE_MATCH_LIMIT || 48), 200);
+  const cacheKey = `${sportQuery || 'all'}:${statusQuery}:${limit}:${req.query?.windowMinutes || ''}`;
   if (cacheFresh(liveMatchesCache, ttl) && liveMatchesCache.cacheKey === cacheKey) return res.json({ ...liveMatchesCache.payload, cached: true });
 
   const extraFilter = {};
@@ -820,24 +946,26 @@ export const liveMatches = asyncHandler(async (req, res) => {
     ];
   }
 
+  const windowUntil = requestedTimeWindowFilter(req);
+  if (windowUntil) {
+    extraFilter.commenceTime = { ...(extraFilter.commenceTime || {}), $lte: windowUntil };
+  }
+
   if (requireRealOddsForList()) {
-    const provider = sportsProviderName();
-    const marketFilter = {
-      ...(shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter(provider)),
-      status: 'OPEN',
-      selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
-    };
-    const marketEventIds = await SportsAutoMarket.distinct('event', marketFilter);
+    const marketEventIds = await providerMarketEventIds();
     extraFilter._id = { $in: marketEventIds };
   }
 
+  const fetchLimit = statusQuery === 'all' ? limit : Math.min(800, Math.max(limit * 4, 80));
   const autoEvents = await SportsAutoEvent.find(visibleEventFilter(extraFilter))
+    .select('provider providerEventId sportKey sportTitle league homeTeam awayTeam commenceTime status scores score completed raw isActive lastProviderUpdate lastScoreUpdate updatedAt createdAt')
     .sort({ status: 1, commenceTime: 1, updatedAt: -1 })
-    .limit(Number(process.env.SPORTS_RESPONSE_MATCH_LIMIT || 80))
+    .limit(fetchLimit)
     .lean();
 
   if (autoEvents.length) {
     let matches = await formatAutoEvents(autoEvents);
+    matches = statusFilteredMatches(matches, statusQuery).slice(0, limit);
     if (requireRealOddsForList()) matches = matches.filter(hasRealOdds);
     const payload = { success: true, data: matches, matches, liveMatches: matches, events: matches, cached: false };
     liveMatchesCache = { createdAt: Date.now(), payload, cacheKey };
