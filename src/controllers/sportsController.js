@@ -166,7 +166,9 @@ function hasRealOdds(match = {}) {
 
 function shouldSyncOnRequest() {
   const value = process.env.SPORTS_AUTO_SYNC_ON_REQUEST;
-  if (value === undefined || value === null || value === '') return true;
+  // Production default: never start a heavy provider sync from a public web/API request.
+  // Use the dedicated sports worker/cron for OpticOdds sync.
+  if (value === undefined || value === null || value === '') return false;
   return String(value).toLowerCase() === 'true';
 }
 
@@ -680,6 +682,8 @@ function formatAutoEventFromMarket(event, market = null) {
     awayTeam: teamObjectForEvent(event, 'away'),
     score: { home: homeScore, away: awayScore },
     scores: event.scores || [],
+    liveState: event.liveState || event.scoreContext || {},
+    scoreContext: event.scoreContext || event.liveState || {},
     status,
     markets: odds,
     odds,
@@ -867,7 +871,7 @@ export const sportsOverview = asyncHandler(async (req, res) => {
   }
 
   const events = await SportsAutoEvent.find(eventFilter)
-    .select('provider providerEventId sportKey sportTitle sport league tournament homeTeam awayTeam commenceTime status scores score completed raw isActive lastProviderUpdate lastScoreUpdate updatedAt createdAt')
+    .select('provider providerEventId sportKey sportTitle sport league tournament homeTeam awayTeam commenceTime status scores score scoreContext liveState completed raw isActive lastProviderUpdate lastScoreUpdate updatedAt createdAt')
     .sort({ status: 1, commenceTime: 1, updatedAt: -1 })
     .limit(scanLimit)
     .lean();
@@ -984,6 +988,7 @@ export const liveMatches = asyncHandler(async (req, res) => {
   // while returning a small, fast response to mobile clients.
   const candidateLimit = Math.min(500, Math.max(limit * 6, limit + skip));
   const autoEvents = await SportsAutoEvent.find(visibleEventFilter(extraFilter))
+    .select('provider providerEventId sportKey sportTitle sport league tournament homeTeam awayTeam commenceTime status scores score scoreContext liveState completed raw isActive lastProviderUpdate lastScoreUpdate updatedAt createdAt')
     .sort({ status: 1, commenceTime: 1, updatedAt: -1 })
     .limit(candidateLimit)
     .lean();
@@ -1077,6 +1082,9 @@ export const eventDetails = asyncHandler(async (req, res) => {
 
   const enrichedDetails = details ? {
     ...details,
+    state: { ...(details.state || {}), ...(event.liveState || event.scoreContext || {}) },
+    scoreContext: event.scoreContext || event.liveState || details.scoreContext || {},
+    scores: Array.isArray(event.scores) && event.scores.length ? event.scores : details.scores,
     // Production sportsbook UI must use DB-normalized selections so every visible
     // provider market can be sent back to the betting engine with the exact
     // selectionId/marketKey used during sync. Raw OpticOdds odds remain available
