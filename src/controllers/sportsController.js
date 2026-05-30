@@ -20,6 +20,7 @@ import { fetchOpticOddsCatalogSection, getOpticOddsCoverageCatalog } from '../se
 
 let backgroundSportsSyncPromise = null;
 let liveMatchesCache = { createdAt: 0, payload: null };
+let sportsOverviewCache = { createdAt: 0, payload: null, cacheKey: '' };
 let categoriesCache = { createdAt: 0, payload: null };
 let matchOfTheDayCache = { createdAt: 0, payload: null };
 let lastBackgroundSettlementAt = 0;
@@ -171,6 +172,7 @@ function shouldSyncOnRequest() {
 
 function invalidateSportsResponseCaches() {
   liveMatchesCache = { createdAt: 0, payload: null };
+  sportsOverviewCache = { createdAt: 0, payload: null, cacheKey: '' };
   categoriesCache = { createdAt: 0, payload: null };
   matchOfTheDayCache = { createdAt: 0, payload: null };
 }
@@ -827,6 +829,113 @@ function boundedListLimit(value, fallback = 48) {
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(200, Math.max(1, Math.floor(parsed)));
 }
+
+
+function sportsOverviewStatusCounts(matches = []) {
+  const counts = { live: 0, prematch: 0, finished: 0 };
+  matches.forEach((match) => {
+    if (matchPassesStatusQuery(match, 'live')) counts.live += 1;
+    else if (matchPassesStatusQuery(match, 'finished')) counts.finished += 1;
+    else counts.prematch += 1;
+  });
+  return counts;
+}
+
+export const sportsOverview = asyncHandler(async (req, res) => {
+  // Lightweight home/sports summary endpoint. It intentionally returns only
+  // small top lists and sport counts so mobile pages do not load hundreds of
+  // markets/details before the user selects a sport or opens a match.
+  maybeAutoSync();
+
+  const ttl = cacheTtlMs('SPORTS_OVERVIEW_CACHE_SECONDS', 12);
+  const limit = boundedListLimit(req.query?.limit, Number(process.env.SPORTS_HOME_MATCH_LIMIT || 12));
+  const scanLimit = Math.min(1500, Math.max(limit * 20, Number(process.env.SPORTS_OVERVIEW_SCAN_LIMIT || 600)));
+  const cacheKey = JSON.stringify({ limit, scanLimit });
+  if (cacheFresh(sportsOverviewCache, ttl) && sportsOverviewCache.cacheKey === cacheKey) {
+    return res.json({ ...sportsOverviewCache.payload, cached: true });
+  }
+
+  let eventFilter = visibleEventFilter();
+  if (requireRealOddsForList()) {
+    const provider = sportsProviderName();
+    const marketEventIds = await SportsAutoMarket.distinct('event', {
+      ...(shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter(provider)),
+      status: 'OPEN',
+      selections: { $elemMatch: { status: 'OPEN', price: { $gt: 1 } } },
+    });
+    eventFilter = visibleEventFilter({ _id: { $in: marketEventIds } });
+  }
+
+  const events = await SportsAutoEvent.find(eventFilter)
+    .select('provider providerEventId sportKey sportTitle sport league tournament homeTeam awayTeam commenceTime status scores score completed raw isActive lastProviderUpdate lastScoreUpdate updatedAt createdAt')
+    .sort({ status: 1, commenceTime: 1, updatedAt: -1 })
+    .limit(scanLimit)
+    .lean();
+
+  const matches = await formatAutoEvents(events);
+  const visibleMatches = requireRealOddsForList() ? matches.filter(hasRealOdds) : matches;
+
+  const sportsMap = new Map();
+  visibleMatches.forEach((match) => {
+    const key = String(match.sportKey || match.category?.key || match.categoryKey || match.sport || 'sports').toLowerCase();
+    const meta = match.category || CATEGORY_META[key] || {
+      key,
+      slug: key,
+      name: match.sportTitle || match.sport || key,
+      displayName: match.sportTitle || match.sport || key,
+      icon: '🏆',
+      colorClass: 'sport-default',
+      gradient: 'linear-gradient(135deg,#8b5cf6,#2563eb)',
+    };
+    const item = sportsMap.get(key) || { ...meta, key, count: 0, live: 0, prematch: 0, finished: 0 };
+    item.count += 1;
+    if (matchPassesStatusQuery(match, 'live')) item.live += 1;
+    else if (matchPassesStatusQuery(match, 'finished')) item.finished += 1;
+    else item.prematch += 1;
+    sportsMap.set(key, item);
+  });
+
+  const sports = Array.from(sportsMap.values()).sort((a, b) => {
+    const priA = CATEGORY_META[a.key] ? Object.keys(CATEGORY_META).indexOf(a.key) : 999;
+    const priB = CATEGORY_META[b.key] ? Object.keys(CATEGORY_META).indexOf(b.key) : 999;
+    if (priA !== priB) return priA - priB;
+    return String(a.displayName || a.name || a.key).localeCompare(String(b.displayName || b.name || b.key));
+  });
+
+  const topLive = visibleMatches.filter((match) => matchPassesStatusQuery(match, 'live')).slice(0, limit);
+  const topPrematch = visibleMatches.filter((match) => matchPassesStatusQuery(match, 'prematch')).slice(0, limit);
+  const counts = sportsOverviewStatusCounts(visibleMatches);
+
+  const payload = {
+    success: true,
+    data: {
+      provider: sportsProviderName(),
+      sports,
+      summary: {
+        sports: sports.length,
+        events: visibleMatches.length,
+        live: counts.live,
+        prematch: counts.prematch,
+        finished: counts.finished,
+      },
+      topLive,
+      topPrematch,
+    },
+    sports,
+    summary: {
+      sports: sports.length,
+      events: visibleMatches.length,
+      live: counts.live,
+      prematch: counts.prematch,
+      finished: counts.finished,
+    },
+    topLive,
+    topPrematch,
+    cached: false,
+  };
+  sportsOverviewCache = { createdAt: Date.now(), payload, cacheKey };
+  return res.json(payload);
+});
 
 export const liveMatches = asyncHandler(async (req, res) => {
   await maybeAutoSync({ wait: boolEnv('SPORTS_AUTO_SYNC_ON_REQUEST_BLOCKING', true) });
