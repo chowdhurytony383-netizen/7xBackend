@@ -52,7 +52,16 @@ function stableId(...parts) {
 }
 
 function sportmonksCricketToken() {
-  return process.env.SPORTMONKS_CRICKET_API_TOKEN || process.env.SPORTMONKS_API_TOKEN || '';
+  // Accept every common Render/env name. Earlier builds only read *_API_TOKEN,
+  // while the production instructions often used SPORTMONKS_CRICKET_API_KEY.
+  // Supporting both prevents the cricket scorecard provider from silently staying disabled.
+  return process.env.SPORTMONKS_CRICKET_API_TOKEN
+    || process.env.SPORTMONKS_CRICKET_TOKEN
+    || process.env.SPORTMONKS_CRICKET_API_KEY
+    || process.env.SPORTMONKS_API_TOKEN
+    || process.env.SPORTMONKS_TOKEN
+    || process.env.SPORTMONKS_API_KEY
+    || '';
 }
 
 export function sportmonksCricketConfigured() {
@@ -843,7 +852,7 @@ async function deactivateStaleSportmonksEvents() {
 async function syncSportmonksCricket({ type = 'odds' } = {}) {
   const startedAt = new Date();
   if (!sportmonksCricketConfigured()) {
-    return { skipped: true, reason: 'SPORTMONKS_CRICKET_API_TOKEN missing or SPORTMONKS_CRICKET_ENABLED=false' };
+    return { skipped: true, reason: 'SportMonks Cricket token missing. Set SPORTMONKS_CRICKET_API_KEY or SPORTMONKS_CRICKET_API_TOKEN, or SPORTMONKS_CRICKET_ENABLED=false' };
   }
 
   const stats = {

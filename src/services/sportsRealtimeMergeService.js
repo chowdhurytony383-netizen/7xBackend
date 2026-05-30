@@ -321,8 +321,13 @@ export async function mergeOfficialScoresIntoOddsEvents(options = {}) {
   const cutoffHours = Math.max(1, Number(options.hours || process.env.SPORTS_REALTIME_MERGE_LOOKBACK_HOURS || process.env.SPORTS_MAX_EVENT_RETENTION_HOURS || 72));
   const cutoff = new Date(Date.now() - cutoffHours * 60 * 60 * 1000);
 
+  const mergeProviders = String(process.env.SPORTS_REALTIME_MERGE_PROVIDERS || 'opticodds,theoddsapi')
+    .split(',')
+    .map((provider) => provider.trim().toLowerCase())
+    .filter(Boolean);
+
   const events = await SportsAutoEvent.find({
-    provider: 'theoddsapi',
+    provider: { $in: mergeProviders },
     isActive: true,
     completed: { $ne: true },
     status: { $in: ['UPCOMING', 'LIVE', 'UNKNOWN'] },
@@ -340,6 +345,7 @@ export async function mergeOfficialScoresIntoOddsEvents(options = {}) {
     checked: events.length,
     updated: 0,
     skipped: 0,
+    providers: mergeProviders,
     errors: [],
   };
 

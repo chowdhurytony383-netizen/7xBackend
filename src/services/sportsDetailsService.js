@@ -36,8 +36,20 @@ function detailsEnabled() {
 
 function providerList() {
   const raw = String(process.env.SPORTS_DETAILS_PROVIDER || process.env.SPORTS_DETAILS_PROVIDERS || 'hybrid').toLowerCase();
-  if (raw === 'hybrid' || raw === 'all' || raw === 'multi') return ['sportmonks', 'api-sports', 'opticodds'];
-  return raw.split(',').map((item) => item.trim()).filter(Boolean);
+  const providers = (raw === 'hybrid' || raw === 'all' || raw === 'multi')
+    ? ['sportmonks', 'api-sports', 'opticodds']
+    : raw.split(',').map((item) => item.trim()).filter(Boolean);
+
+  // Cricket scorecards can be delegated to SportMonks while odds stay on OpticOdds.
+  // CRICKET_DETAILS_PROVIDER=sportmonks is the clean production env for this hybrid mode.
+  const cricketProvider = String(process.env.CRICKET_DETAILS_PROVIDER || process.env.SPORTS_CRICKET_DETAILS_PROVIDER || '').toLowerCase();
+  const cricketSportmonksRequested = ['sportmonks', 'sportmonks-cricket', 'sportmonks_cricket'].includes(cricketProvider)
+    || (boolEnv('SPORTMONKS_CRICKET_ENABLED', false) && sportmonksCricketConfigured());
+  if (cricketSportmonksRequested && !providers.includes('sportmonks')) {
+    providers.unshift('sportmonks');
+  }
+
+  return [...new Set(providers)];
 }
 
 function oddsProviderConfigured() {
@@ -239,7 +251,8 @@ export async function getSportsMatchDetails(event = {}) {
   }
 
   const providers = providerList();
-  const canUseSportmonksCricket = providers.includes('sportmonks') && sportmonksCricketConfigured() && cricketLike(event);
+  const cricketProvider = String(process.env.CRICKET_DETAILS_PROVIDER || process.env.SPORTS_CRICKET_DETAILS_PROVIDER || '').toLowerCase();
+  const canUseSportmonksCricket = (providers.includes('sportmonks') || ['sportmonks', 'sportmonks-cricket', 'sportmonks_cricket'].includes(cricketProvider)) && sportmonksCricketConfigured() && cricketLike(event);
   const canUseSportmonksFootball = providers.includes('sportmonks') && sportmonksFootballDetailsConfigured() && footballLike(event);
   const canUseApiSports = (providers.includes('api-sports') || providers.includes('apisports')) && apiSportsProviderConfigured() && apiSportsSupportsEvent(event);
   const canUseTheOddsApi = canUseTheOddsApiBasicDetails(event);
