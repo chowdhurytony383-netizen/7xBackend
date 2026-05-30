@@ -156,7 +156,7 @@ export const env = {
   // Free/low-cost automatic sports betting system.
   // Requires a free odds API key such as The Odds API.
   SPORTS_AUTO_SYSTEM_ENABLED: String(process.env.SPORTS_AUTO_SYSTEM_ENABLED || 'true').toLowerCase() === 'true',
-  SPORTS_AUTO_SYNC_ON_REQUEST: String(process.env.SPORTS_AUTO_SYNC_ON_REQUEST || 'true').toLowerCase() === 'true',
+  SPORTS_AUTO_SYNC_ON_REQUEST: String(process.env.SPORTS_AUTO_SYNC_ON_REQUEST || 'false').toLowerCase() === 'true',
   SPORTS_ODDS_PROVIDER: process.env.SPORTS_ODDS_PROVIDER || 'theoddsapi',
   SPORTS_ODDS_API_KEY: process.env.SPORTS_ODDS_API_KEY || process.env.THE_ODDS_API_KEY || process.env.SPORTSGAMEODDS_API_KEY || process.env.SPORTS_GAME_ODDS_API_KEY || '',
   THE_ODDS_API_KEY: process.env.THE_ODDS_API_KEY || process.env.SPORTS_ODDS_API_KEY || '',
