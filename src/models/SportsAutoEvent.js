@@ -29,6 +29,8 @@ const sportsAutoEventSchema = new mongoose.Schema({
   },
   scores: { type: [scoreSideSchema], default: [] },
   score: { type: mongoose.Schema.Types.Mixed, default: {} },
+  scoreContext: { type: mongoose.Schema.Types.Mixed, default: {} },
+  liveState: { type: mongoose.Schema.Types.Mixed, default: {} },
   scoreSource: { type: String, default: '' },
   completed: { type: Boolean, default: false, index: true },
   lastProviderUpdate: Date,
@@ -40,5 +42,7 @@ const sportsAutoEventSchema = new mongoose.Schema({
 sportsAutoEventSchema.index({ provider: 1, providerEventId: 1 }, { unique: true });
 sportsAutoEventSchema.index({ isActive: 1, completed: 1, status: 1, commenceTime: 1, updatedAt: -1 });
 sportsAutoEventSchema.index({ sportKey: 1, isActive: 1, commenceTime: 1 });
+sportsAutoEventSchema.index({ provider: 1, sportKey: 1, status: 1, isActive: 1, commenceTime: 1 });
+sportsAutoEventSchema.index({ status: 1, isActive: 1, commenceTime: 1, updatedAt: -1 });
 
 export default mongoose.models.SportsAutoEvent || mongoose.model('SportsAutoEvent', sportsAutoEventSchema);
