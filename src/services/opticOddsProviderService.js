@@ -567,35 +567,158 @@ function scoreDisplay(score = 0, wickets = null, overs = '') {
   return base;
 }
 
+function normalizeScoreLike(value, fallback = 0) {
+  if (value === undefined || value === null || value === '') {
+    return { score: fallback, wickets: null, overs: '', display: scoreText(fallback, '0'), raw: value };
+  }
+
+  if (typeof value === 'number') {
+    return { score: value, wickets: null, overs: '', display: String(value), raw: value };
+  }
+
+  if (typeof value === 'string') {
+    const text = value.trim();
+    const cricket = text.match(/(\d+)\s*(?:\/\s*(\d+))?\s*(?:\(?\s*(\d+(?:\.\d+)?)\s*(?:ov|over|overs)\s*\)?)?/i);
+    if (cricket) {
+      const score = numberFrom(cricket[1], fallback);
+      const wickets = cricket[2] !== undefined ? numberFrom(cricket[2], null) : null;
+      const overs = cricket[3] !== undefined ? String(cricket[3]) : '';
+      return { score, wickets, overs, display: scoreDisplay(score, wickets, overs), raw: value };
+    }
+    return { score: numberFrom(text, fallback), wickets: null, overs: '', display: text || String(fallback), raw: value };
+  }
+
+  if (Array.isArray(value)) {
+    const first = value.find((item) => item !== undefined && item !== null && item !== '');
+    return normalizeScoreLike(first, fallback);
+  }
+
+  if (typeof value === 'object') {
+    const nested = value.current ?? value.current_score ?? value.currentScore ?? value.total_score ?? value.totalScore;
+    if (nested && typeof nested === 'object' && nested !== value) return normalizeScoreLike(nested, fallback);
+
+    const rawScore = value.runs ?? value.run ?? value.score ?? value.total ?? value.value ?? value.points ?? value.goals ?? value.home_score ?? value.away_score ?? fallback;
+    const wickets = value.wickets ?? value.wkts ?? value.outs ?? value.fallen_wickets ?? value.fallenWickets ?? null;
+    const overs = value.overs ?? value.over ?? value.current_over ?? value.currentOver ?? value.overs_bowled ?? value.oversBowled ?? '';
+    const display = value.display || value.formatted || value.label || value.description || scoreDisplay(rawScore, wickets, overs);
+    const parsedDisplay = typeof display === 'string' ? normalizeScoreLike(display, fallback) : null;
+    if (parsedDisplay && (parsedDisplay.wickets !== null || parsedDisplay.overs)) return { ...parsedDisplay, raw: value };
+    return {
+      score: numberFrom(rawScore, fallback),
+      wickets: wickets === undefined || wickets === null || wickets === '' ? null : numberFrom(wickets, null),
+      overs: overs === undefined || overs === null ? '' : String(overs),
+      display: scoreDisplay(rawScore, wickets, overs),
+      raw: value,
+    };
+  }
+
+  return { score: fallback, wickets: null, overs: '', display: scoreText(value, String(fallback)), raw: value };
+}
+
+function scoreSideRow(side, name, value, extra = {}) {
+  const parsed = normalizeScoreLike(value, 0);
+  return {
+    side,
+    name,
+    score: parsed.score,
+    wickets: extra.wickets ?? parsed.wickets,
+    overs: extra.overs ?? parsed.overs,
+    inning: extra.inning ?? parsed.inning ?? null,
+    label: extra.label || name,
+    display: extra.display || parsed.display || scoreDisplay(parsed.score, parsed.wickets, parsed.overs),
+  };
+}
+
 function scoreSideFromRows(item = {}, homeTeam = '', awayTeam = '') {
   const scores = [];
-  const homeScore = item.home_score ?? item.homeScore ?? item.score?.home ?? item.scores?.home ?? item.result?.home;
-  const awayScore = item.away_score ?? item.awayScore ?? item.score?.away ?? item.scores?.away ?? item.result?.away;
+  const homeScore = item.home_score ?? item.homeScore ?? item.score?.home ?? item.scores?.home ?? item.result?.home ?? item.result?.scores?.home;
+  const awayScore = item.away_score ?? item.awayScore ?? item.score?.away ?? item.scores?.away ?? item.result?.away ?? item.result?.scores?.away;
 
   if (homeScore !== undefined || awayScore !== undefined) {
-    scores.push({ side: 'home', name: homeTeam, score: numberFrom(homeScore?.runs ?? homeScore?.score ?? homeScore?.total ?? homeScore, 0), display: scoreText(homeScore, '0'), raw: homeScore });
-    scores.push({ side: 'away', name: awayTeam, score: numberFrom(awayScore?.runs ?? awayScore?.score ?? awayScore?.total ?? awayScore, 0), display: scoreText(awayScore, '0'), raw: awayScore });
+    scores.push(scoreSideRow('home', homeTeam, homeScore));
+    scores.push(scoreSideRow('away', awayTeam, awayScore));
     return scores;
   }
 
-  const rows = arrayFrom(item.scores, item.scoreboard, item.results, item.period_scores, item.fixture?.scores);
+  const rows = arrayFrom(
+    item.scores,
+    item.scoreboard,
+    item.results,
+    item.period_scores,
+    item.fixture?.scores,
+    item.result?.scores,
+    item.rawResult?.scores,
+    item.rawResult?.data?.[0]?.scores
+  );
+
   rows.forEach((row, index) => {
-    const side = String(row.side || row.home_away || '').toLowerCase() || (index === 0 ? 'home' : index === 1 ? 'away' : '');
-    const name = firstString(row.name, row.team, row.team_name, side === 'home' ? homeTeam : side === 'away' ? awayTeam : '');
-    const score = row.score ?? row.points ?? row.goals ?? row.runs ?? row.value ?? row.total ?? 0;
-    scores.push({
-      side,
-      name,
-      score: numberFrom(score, 0),
-      wickets: row.wickets ?? null,
-      overs: row.overs ? String(row.overs) : '',
-      inning: row.inning ?? row.period ?? null,
+    if (!row || typeof row !== 'object') return;
+    const side = String(row.side || row.home_away || row.team_side || '').toLowerCase() || (index === 0 ? 'home' : index === 1 ? 'away' : '');
+    const name = firstString(row.name, row.team, row.team_name, row.label, side === 'home' ? homeTeam : side === 'away' ? awayTeam : '');
+    const value = row.display ?? row.formatted ?? row.score ?? row.points ?? row.goals ?? row.runs ?? row.value ?? row.total ?? row.result ?? 0;
+    scores.push(scoreSideRow(side, name, value, {
+      wickets: row.wickets ?? row.wkts ?? null,
+      overs: row.overs ?? row.over ?? '',
+      inning: row.inning ?? row.period ?? row.period_number ?? null,
       label: row.label || name,
-      display: row.display || row.formatted || scoreDisplay(score, row.wickets ?? row.wkts ?? null, row.overs ? String(row.overs) : ''),
-    });
+    }));
   });
 
   return scores;
+}
+
+function findDeepValue(root, keys = [], maxDepth = 7) {
+  const wanted = new Set(keys.map((key) => String(key).toLowerCase().replace(/[^a-z0-9]/g, '')));
+  const seen = new WeakSet();
+  const queue = [{ value: root, depth: 0 }];
+  while (queue.length) {
+    const { value, depth } = queue.shift();
+    if (!value || typeof value !== 'object' || depth > maxDepth) continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((item) => queue.push({ value: item, depth: depth + 1 }));
+      continue;
+    }
+    for (const [key, entry] of Object.entries(value)) {
+      const normalized = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (wanted.has(normalized) && entry !== undefined && entry !== null && entry !== '') return entry;
+      if (entry && typeof entry === 'object') queue.push({ value: entry, depth: depth + 1 });
+    }
+  }
+  return undefined;
+}
+
+function stateText(value = '') {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'object') return firstString(value.display, value.name, value.label, value.short, value.value, value.status, value.description);
+  return String(value);
+}
+
+function liveStateFrom(item = {}, sportKey = '') {
+  const source = { item, rawResult: item.rawResult, result: item.result, fixture: item.fixture, in_play: item.in_play };
+  const state = {
+    clock: stateText(findDeepValue(source, ['clock', 'game_clock', 'gameClock', 'minute', 'minutes', 'timer', 'time_elapsed', 'timeElapsed'])),
+    period: stateText(findDeepValue(source, ['period', 'period_number', 'periodNumber', 'current_period', 'currentPeriod', 'inning', 'innings', 'current_inning', 'currentInning'])),
+    gameState: stateText(findDeepValue(source, ['game_state', 'gameState', 'status', 'state', 'description'])),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (String(sportKey || '').toLowerCase().includes('cricket')) {
+    state.currentOver = stateText(findDeepValue(source, ['overs', 'over', 'current_over', 'currentOver', 'over_number', 'overNumber']));
+    state.balls = stateText(findDeepValue(source, ['balls', 'ball', 'balls_bowled', 'ballsBowled']));
+    state.battingTeam = stateText(findDeepValue(source, ['batting_team', 'battingTeam', 'current_batting_team', 'currentBattingTeam']));
+    state.bowlingTeam = stateText(findDeepValue(source, ['bowling_team', 'bowlingTeam', 'current_bowling_team', 'currentBowlingTeam']));
+    state.striker = stateText(findDeepValue(source, ['striker', 'on_strike', 'onStrike', 'current_batter', 'currentBatter', 'batsman', 'current_batsman', 'currentBatsman']));
+    state.nonStriker = stateText(findDeepValue(source, ['non_striker', 'nonStriker', 'runner', 'non_strike_batsman', 'nonStrikeBatsman']));
+    state.bowler = stateText(findDeepValue(source, ['bowler', 'current_bowler', 'currentBowler']));
+    state.target = stateText(findDeepValue(source, ['target', 'target_score', 'targetScore', 'runs_to_win', 'runsToWin']));
+    state.runRate = stateText(findDeepValue(source, ['run_rate', 'runRate', 'current_run_rate', 'currentRunRate']));
+    state.requiredRate = stateText(findDeepValue(source, ['required_run_rate', 'requiredRunRate', 'required_rate', 'requiredRate']));
+    state.lastPlay = stateText(findDeepValue(source, ['last_ball', 'lastBall', 'last_play', 'lastPlay', 'last_event', 'lastEvent', 'commentary']));
+  }
+
+  return Object.fromEntries(Object.entries(state).filter(([, value]) => value !== undefined && value !== null && value !== ''));
 }
 
 function fixtureToEvent(item = {}, fallbackSport = '') {
@@ -605,6 +728,9 @@ function fixtureToEvent(item = {}, fallbackSport = '') {
   const awayTeam = awayNameFrom(item);
   const status = normalizeStatus(item.status || item.status_display || item.state, item);
   const scores = scoreSideFromRows(item, homeTeam, awayTeam);
+  const homeScore = scores.find((score) => score.side === 'home') || scores[0] || null;
+  const awayScore = scores.find((score) => score.side === 'away') || scores[1] || null;
+  const liveState = liveStateFrom(item, sportKey);
 
   return {
     providerEventId,
@@ -617,6 +743,12 @@ function fixtureToEvent(item = {}, fallbackSport = '') {
     status,
     completed: status === 'FINISHED',
     scores,
+    score: {
+      home: homeScore?.display ?? homeScore?.score ?? 0,
+      away: awayScore?.display ?? awayScore?.score ?? 0,
+    },
+    scoreContext: liveState,
+    liveState,
     raw: item,
   };
 }
@@ -795,11 +927,16 @@ function extractOddsRows(payloads = [], fixture = {}) {
     }));
 }
 
+function normalizedBookKey(value = '') {
+  return String(value || 'opticodds').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'opticodds';
+}
+
 function groupMarketRows(rows = [], providerEventId = '') {
   const marketMap = new Map();
 
   rows.forEach((row) => {
-    const marketKey = row.marketKey || 'h2h';
+    const baseMarketKey = row.marketKey || 'h2h';
+    const marketKey = bool(process.env.OPTICODDS_GROUP_MARKETS_BY_SPORTBOOK, true) ? `${baseMarketKey}:${normalizedBookKey(row.sportsbook)}` : baseMarketKey;
     const current = marketMap.get(marketKey);
     const nextRank = bookmakerRank(row.sportsbook);
     const currentRank = bookmakerRank(current?.sportsbook || '');
@@ -828,8 +965,8 @@ function groupMarketRows(rows = [], providerEventId = '') {
   return Array.from(marketMap.entries())
     .map(([marketKey, group]) => ({
       marketKey,
-      marketName: group.marketName || marketNameFor(marketKey),
-      marketDisplayName: group.marketName || marketNameFor(marketKey),
+      marketName: group.marketName || marketNameFor(String(marketKey).split(':')[0]),
+      marketDisplayName: group.marketName || marketNameFor(String(marketKey).split(':')[0]),
       bookmaker: group.sportsbook,
       selections: group.rows
         .map((row) => ({
@@ -872,6 +1009,9 @@ async function upsertOpticEvent(fixture = {}) {
         status: eventData.status,
         completed: eventData.completed,
         scores: eventData.scores,
+        score: eventData.score || {},
+        scoreContext: eventData.scoreContext || {},
+        liveState: eventData.liveState || eventData.scoreContext || {},
         lastProviderUpdate: new Date(),
         lastScoreUpdate: eventData.scores.length ? new Date() : undefined,
         raw: {
@@ -914,6 +1054,12 @@ async function upsertOpticMarkets(event, fixture = {}, payloads = []) {
     );
     marketCount += 1;
   }
+
+  const currentKeys = markets.map((market) => market.marketKey);
+  await SportsAutoMarket.updateMany(
+    { provider: PROVIDER, providerEventId: event.providerEventId, marketKey: { $nin: currentKeys }, status: { $ne: 'CLOSED' } },
+    { $set: { status: 'CLOSED', lastProviderUpdate: new Date() } }
+  );
 
   return marketCount;
 }
@@ -1005,15 +1151,20 @@ function activeFixtureParams(sport = '') {
   return params;
 }
 
+function syncAllMarketsEnabled() {
+  return bool(process.env.OPTICODDS_SYNC_ALL_MARKETS, false) || !configuredMarkets().length;
+}
+
 function oddsSnapshotParams(fixture = {}, sport = '') {
   const fixtureId = eventIdFrom(fixture);
-  return {
+  const params = {
     fixture_id: fixtureId ? [fixtureId] : [],
     sportsbook: preferredSportsbooks(),
     market: configuredMarkets(),
-    is_main: 'true',
     odds_format: 'DECIMAL',
   };
+  if (!syncAllMarketsEnabled()) params.is_main = 'true';
+  return params;
 }
 
 function resultsSnapshotParams(fixture = {}, sport = '') {
@@ -1025,13 +1176,14 @@ function resultsSnapshotParams(fixture = {}, sport = '') {
 
 function streamParams(fixture = {}, sport = '') {
   const fixtureId = eventIdFrom(fixture);
-  return {
+  const params = {
     fixture_id: fixtureId ? [fixtureId] : [],
     sportsbook: preferredSportsbooks(),
     market: configuredMarkets(),
-    is_main: 'true',
     odds_format: 'DECIMAL',
   };
+  if (!syncAllMarketsEnabled()) params.is_main = 'true';
+  return params;
 }
 
 function fixtureLimit() {

@@ -21,6 +21,10 @@ function intervalMs(name, fallbackSeconds, minimumSeconds = 10) {
   return Math.max(minimumSeconds, seconds) * 1000;
 }
 
+function isSportsWorkerProcess() {
+  return String(process.env.SPORTS_PROCESS_ROLE || process.env.RENDER_SERVICE_TYPE || '').toLowerCase().includes('worker');
+}
+
 async function runSyncCycle(reason = 'timer') {
   if (syncRunning) return { skipped: true, reason: 'sports sync already running' };
   syncRunning = true;
@@ -59,7 +63,9 @@ async function runSettlementCycle(reason = 'timer') {
 export function startSportsBackgroundScheduler() {
   if (schedulerStarted) return false;
   if (!env.SPORTS_AUTO_SYSTEM_ENABLED) return false;
-  if (!boolEnv('SPORTS_BACKGROUND_SYNC_ENABLED', true)) return false;
+  // Main Render web/API service must stay fast. Background sports sync is disabled by
+  // default there and enabled by default only in the dedicated sports worker.
+  if (!boolEnv('SPORTS_BACKGROUND_SYNC_ENABLED', isSportsWorkerProcess())) return false;
 
   schedulerStarted = true;
 
@@ -69,7 +75,7 @@ export function startSportsBackgroundScheduler() {
   syncTimer = setInterval(() => runSyncCycle('interval'), syncEveryMs);
   settlementTimer = setInterval(() => runSettlementCycle('interval'), settlementEveryMs);
 
-  if (boolEnv('SPORTS_BACKGROUND_RUN_ON_START', true)) {
+  if (boolEnv('SPORTS_BACKGROUND_RUN_ON_START', isSportsWorkerProcess())) {
     setTimeout(() => runSyncCycle('startup'), 1500).unref?.();
     setTimeout(() => runSettlementCycle('startup'), 5000).unref?.();
   }
