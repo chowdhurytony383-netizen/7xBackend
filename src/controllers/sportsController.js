@@ -342,50 +342,144 @@ function colorIndexFor(value = '') {
   return (hash % 8) + 1;
 }
 
+function firstLogoUrl(...values) {
+  for (const value of values) {
+    if (!value) continue;
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (/^https?:\/\//i.test(text) || /^\//.test(text)) return text;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      const found = firstLogoUrl(...value);
+      if (found) return found;
+      continue;
+    }
+    if (typeof value === 'object') {
+      const found = firstLogoUrl(
+        value.url,
+        value.href,
+        value.src,
+        value.path,
+        value.logo,
+        value.logoUrl,
+        value.logoURL,
+        value.logo_url,
+        value.logo_path,
+        value.logoPath,
+        value.image,
+        value.imageUrl,
+        value.imageURL,
+        value.image_url,
+        value.image_path,
+        value.imagePath,
+        value.flag,
+        value.flagUrl,
+        value.flagURL,
+        value.flag_url,
+        value.flag_path,
+        value.badge,
+        value.badgeUrl,
+        value.badge_url,
+        value.thumbnail,
+        value.thumbnailUrl,
+        value.raw
+      );
+      if (found) return found;
+    }
+  }
+  return '';
+}
+
 function logoFromSource(source = {}) {
   if (!source || typeof source !== 'object') return '';
-  return source.logo
-    || source.logoUrl
-    || source.image
-    || source.imageUrl
-    || source.image_path
-    || source.flag
-    || source.flagUrl
-    || source.badge
-    || source.raw?.logo
-    || source.raw?.logoUrl
-    || source.raw?.image
-    || source.raw?.imageUrl
-    || source.raw?.image_path
-    || '';
+  return firstLogoUrl(source);
+}
+
+function teamNameFromSource(source = {}, fallback = 'Team') {
+  if (!source || typeof source !== 'object') return fallback;
+  return source.name
+    || source.displayName
+    || source.display_name
+    || source.shortName
+    || source.short_name
+    || source.team?.name
+    || source.participant?.name
+    || source.competitor?.name
+    || source.raw?.name
+    || source.raw?.displayName
+    || source.raw?.display_name
+    || fallback;
 }
 
 function teamObject(name, sportKey = '', source = {}) {
-  const resolvedName = source?.name || source?.displayName || source?.shortName || name;
+  const resolvedName = teamNameFromSource(source, name);
   const logo = logoFromSource(source);
   return {
     name: resolvedName,
     displayName: resolvedName,
-    shortName: source?.shortName || shortTeamCode(resolvedName),
+    shortName: source?.shortName || source?.short_name || shortTeamCode(resolvedName),
     logo,
     logoUrl: logo,
     image: logo,
     imageUrl: logo,
-    flag: source?.flag || source?.flagUrl || '',
+    flag: firstLogoUrl(source?.flag, source?.flagUrl, source?.flag_url) || '',
     logoText: source?.logoText || shortTeamCode(resolvedName),
     colorClass: source?.colorClass || `team-logo-${colorIndexFor(`${sportKey}:${resolvedName}`)}`,
-    raw: source?.raw || null,
+    raw: source?.raw || source || null,
   };
+}
+
+function firstUsefulTeamSource(...sources) {
+  return sources.find((source) => source && typeof source === 'object' && (teamNameFromSource(source, '') || logoFromSource(source))) || {};
+}
+
+function participantForSide(raw = {}, side = 'home') {
+  if (!raw || typeof raw !== 'object') return {};
+  const index = side === 'home' ? 0 : 1;
+  const sideKeys = side === 'home'
+    ? ['home', 'localteam', 'local_team', 'team1', 'participant1']
+    : ['away', 'visitorteam', 'visitor_team', 'team2', 'participant2'];
+
+  const direct = side === 'home'
+    ? firstUsefulTeamSource(raw.homeTeam, raw.home_team, raw.localteam, raw.local_team, raw.localTeam, raw.home_competitors?.[0], raw.fixture?.home_competitors?.[0])
+    : firstUsefulTeamSource(raw.awayTeam, raw.away_team, raw.visitorteam, raw.visitor_team, raw.visitorTeam, raw.away_competitors?.[0], raw.fixture?.away_competitors?.[0]);
+  if (Object.keys(direct).length) return direct;
+
+  const arrays = [raw.participants, raw.competitors, raw.teams, raw.fixture?.participants, raw.fixture?.competitors, raw.fixture?.teams];
+  for (const items of arrays) {
+    if (!Array.isArray(items)) continue;
+    const bySide = items.find((item) => {
+      const text = `${item?.side || ''} ${item?.type || ''} ${item?.home_away || ''} ${item?.qualifier || ''} ${item?.meta?.location || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return sideKeys.some((key) => text.includes(key.replace(/[^a-z0-9]/g, '')));
+    });
+    if (bySide) return bySide;
+    if (items[index]) return items[index];
+  }
+
+  if (raw.teams && typeof raw.teams === 'object') {
+    return raw.teams[side]
+      || (side === 'home' ? raw.teams.home_team || raw.teams.localteam : raw.teams.away_team || raw.teams.visitorteam)
+      || {};
+  }
+  if (raw.participants && typeof raw.participants === 'object') return raw.participants[side] || {};
+  return {};
 }
 
 function teamObjectForEvent(event = {}, side = 'home') {
   const name = side === 'home' ? event.homeTeam : event.awayTeam;
-  const sportmonksTeams = event.raw?.sportmonksTeams || {};
-  const fallbackTeams = event.raw?.teams || event.raw?.participants || {};
-  const source = sportmonksTeams[side]
-    || fallbackTeams[side]
-    || event.raw?.[side === 'home' ? 'homeTeam' : 'awayTeam']
-    || {};
+  const raw = event.raw && typeof event.raw === 'object' ? event.raw : {};
+  const sportmonksTeams = raw.sportmonksTeams || {};
+  const officialTeams = raw.officialRealtimeTeams || raw.detailsTeams || {};
+  const fallbackTeams = raw.teams || raw.participants || {};
+  const source = firstUsefulTeamSource(
+    sportmonksTeams[side],
+    officialTeams[side],
+    fallbackTeams?.[side],
+    raw?.[side === 'home' ? 'homeTeam' : 'awayTeam'],
+    participantForSide(raw, side),
+    participantForSide(raw.fixture, side)
+  );
   return teamObject(name, event.sportKey, source);
 }
 
