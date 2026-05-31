@@ -258,144 +258,41 @@ function shouldUseDetails(details = {}) {
   return Boolean(details.provider && details.provider !== 'theoddsapi');
 }
 
+function teamHasLogo(team = {}) {
+  if (!team || typeof team !== 'object') return false;
+  return Boolean(
+    team.logo
+    || team.logoUrl
+    || team.logo_url
+    || team.logo_path
+    || team.image
+    || team.imageUrl
+    || team.image_url
+    || team.image_path
+    || team.flag
+    || team.flagUrl
+    || team.raw?.logo
+    || team.raw?.image_path
+  );
+}
+
+function detailsHaveTeamLogos(details = {}) {
+  return teamHasLogo(details.homeTeam) || teamHasLogo(details.awayTeam);
+}
+
 function shouldUpdateFromDetails(event = {}, details = {}, scores = [], status = '') {
   if (!shouldUseDetails(details)) return false;
   if (scores.length) return true;
+  if (detailsHaveTeamLogos(details)) return true;
   return ['LIVE', 'FINISHED', 'CANCELLED'].includes(String(status || '').toUpperCase())
     && String(status || '').toUpperCase() !== String(event.status || '').toUpperCase();
-}
-
-
-function cricketLikeEvent(event = {}) {
-  const text = `${event.sportKey || ''} ${event.sportTitle || ''} ${event.sport || ''} ${event.league || ''}`.toLowerCase();
-  return text.includes('cricket') || text.includes('t20') || text.includes('odi') || text.includes('ipl');
-}
-
-function cricketScoresAreRich(scores = []) {
-  return Array.isArray(scores) && scores.some((score) => {
-    if (!score || typeof score !== 'object') return false;
-    const wickets = score.wickets ?? score.wicket;
-    const overs = score.overs ?? score.over;
-    const display = String(score.display || score.value || score.label || '');
-    return (wickets !== undefined && wickets !== null && wickets !== '')
-      || (overs !== undefined && overs !== null && String(overs).trim() !== '')
-      || /\d+\/\d+\s*\(/.test(display);
-  });
-}
-
-function teamMatchScore(left = '', right = '') {
-  const a = normalizeName(left);
-  const b = normalizeName(right);
-  if (!a || !b) return 0;
-  if (a === b) return 100;
-  if (a.includes(b) || b.includes(a)) return 86;
-  const aw = new Set(a.split(' ').filter((x) => x.length > 2));
-  const bw = new Set(b.split(' ').filter((x) => x.length > 2));
-  if (!aw.size || !bw.size) return 0;
-  let common = 0;
-  for (const word of aw) if (bw.has(word)) common += 1;
-  return Math.round((common / Math.max(aw.size, bw.size)) * 100);
-}
-
-function matchPairScore(event = {}, candidate = {}) {
-  const direct = Math.min(
-    teamMatchScore(event.homeTeam, candidate.homeTeam),
-    teamMatchScore(event.awayTeam, candidate.awayTeam)
-  );
-  const swapped = Math.min(
-    teamMatchScore(event.homeTeam, candidate.awayTeam),
-    teamMatchScore(event.awayTeam, candidate.homeTeam)
-  );
-  return Math.max(direct, swapped);
-}
-
-function dateDistanceMs(event = {}, candidate = {}) {
-  const a = new Date(event.commenceTime || event.startTime || event.raw?.commence_time || 0).getTime();
-  const b = new Date(candidate.commenceTime || candidate.startTime || candidate.raw?.starting_at || 0).getTime();
-  if (!a || !b) return Number.MAX_SAFE_INTEGER;
-  return Math.abs(a - b);
-}
-
-function storedSportmonksEventToDetails(candidate = {}) {
-  const state = candidate.liveState || candidate.raw?.state || {};
-  return {
-    enabled: true,
-    provider: 'sportmonks',
-    providerSport: 'cricket',
-    sport: 'cricket',
-    available: true,
-    fixtureId: candidate.providerEventId || candidate.raw?.id || candidate.raw?.fixture_id || null,
-    name: `${candidate.homeTeam || 'Home'} vs ${candidate.awayTeam || 'Away'}`,
-    status: candidate.status,
-    state,
-    homeTeam: { name: candidate.homeTeam, raw: candidate.raw?.homeTeam || candidate.raw?.localteam || null },
-    awayTeam: { name: candidate.awayTeam, raw: candidate.raw?.awayTeam || candidate.raw?.visitorteam || null },
-    scores: Array.isArray(candidate.scores) ? candidate.scores : [],
-    scoreSummary: Array.isArray(candidate.scores) ? candidate.scores : [],
-    scoreboards: candidate.raw?.scoreboards || candidate.raw?.rawScoreboards || [],
-    runs: candidate.raw?.runs || candidate.raw?.rawRuns || [],
-    balls: candidate.raw?.balls || candidate.raw?.rawBalls || [],
-    batting: candidate.raw?.batting || [],
-    bowling: candidate.raw?.bowling || [],
-    raw: candidate.raw || candidate,
-  };
-}
-
-async function findStoredSportmonksCricketDetails(event = {}) {
-  if (!cricketLikeEvent(event)) return null;
-  const start = new Date(event.commenceTime || event.startTime || event.raw?.commence_time || Date.now());
-  const startTime = Number.isFinite(start.getTime()) ? start.getTime() : Date.now();
-  const windowHours = Math.max(6, Number(process.env.SPORTMONKS_CRICKET_DB_MATCH_WINDOW_HOURS || 36));
-  const from = new Date(startTime - windowHours * 60 * 60 * 1000);
-  const to = new Date(startTime + windowHours * 60 * 60 * 1000);
-
-  const candidates = await SportsAutoEvent.find({
-    provider: 'sportmonks',
-    sportKey: 'cricket',
-    isActive: true,
-    completed: { $ne: true },
-    status: { $in: ['LIVE', 'UPCOMING', 'UNKNOWN', 'FINISHED'] },
-    $or: [
-      { commenceTime: { $gte: from, $lte: to } },
-      { commenceTime: { $exists: false } },
-      { commenceTime: null },
-    ],
-  })
-    .sort({ status: 1, updatedAt: -1 })
-    .limit(250)
-    .lean();
-
-  let best = null;
-  for (const candidate of candidates) {
-    const score = matchPairScore(event, candidate);
-    if (score < Number(process.env.SPORTMONKS_CRICKET_DB_MATCH_MIN_SCORE || 55)) continue;
-    const distance = dateDistanceMs(event, candidate);
-    const rank = score * 1000000000000 - Math.min(distance, 999999999999);
-    if (!best || rank > best.rank) best = { candidate, rank, score, distance };
-  }
-
-  if (!best) return null;
-  return storedSportmonksEventToDetails(best.candidate);
 }
 
 export async function refreshEventScoresFromDetails(event = {}, providedDetails = null, options = {}) {
   if (!event?._id) return event;
 
-  let details = providedDetails || await getSportsMatchDetails(event);
-  let scores = scoresFromDetails(details, event);
-
-  // Production cricket safety net:
-  // OpticOdds normally owns betting odds, while SportMonks owns cricket scorecard depth.
-  // When provider matching misses a fixture, use the SportMonks event already stored by the cricket sync.
-  if (cricketLikeEvent(event) && !cricketScoresAreRich(scores)) {
-    const storedDetails = await findStoredSportmonksCricketDetails(event);
-    const storedScores = scoresFromDetails(storedDetails || {}, event);
-    if (storedDetails?.available && (cricketScoresAreRich(storedScores) || hasScoreProgress(storedScores))) {
-      details = storedDetails;
-      scores = storedScores;
-    }
-  }
-
+  const details = providedDetails || await getSportsMatchDetails(event);
+  const scores = scoresFromDetails(details, event);
   const status = statusFromDetails(details || {}, event, scores);
   const completed = ['FINISHED', 'CANCELLED'].includes(String(status || '').toUpperCase());
 
@@ -420,13 +317,24 @@ export async function refreshEventScoresFromDetails(event = {}, providedDetails 
       officialRealtimeFixtureId: details.fixtureId || null,
       officialRealtimeStatus: status,
       officialRealtimeScores: scores,
+      // Store provider team logos/names in the event cache so all lightweight
+      // list/home match cards can render the same official badges shown in
+      // the full details modal, without making slow per-card details calls.
+      officialRealtimeTeams: {
+        ...(existingRaw.officialRealtimeTeams || {}),
+        home: details.homeTeam || existingRaw.officialRealtimeTeams?.home || null,
+        away: details.awayTeam || existingRaw.officialRealtimeTeams?.away || null,
+      },
+      sportmonksTeams: details.provider === 'sportmonks' || String(details.provider || '').includes('sportmonks') ? {
+        ...(existingRaw.sportmonksTeams || {}),
+        home: details.homeTeam || existingRaw.sportmonksTeams?.home || null,
+        away: details.awayTeam || existingRaw.sportmonksTeams?.away || null,
+      } : existingRaw.sportmonksTeams,
       officialRealtimeUpdatedAt: new Date().toISOString(),
     },
   };
 
   if (scores.length) update.scores = scores;
-  if (details?.state || details?.liveState) update.liveState = details.liveState || details.state;
-  if (details?.scoreContext) update.scoreContext = details.scoreContext;
 
   const updated = await SportsAutoEvent.findByIdAndUpdate(
     event._id,
@@ -449,13 +357,12 @@ export async function mergeOfficialScoresIntoOddsEvents(options = {}) {
   const cutoffHours = Math.max(1, Number(options.hours || process.env.SPORTS_REALTIME_MERGE_LOOKBACK_HOURS || process.env.SPORTS_MAX_EVENT_RETENTION_HOURS || 72));
   const cutoff = new Date(Date.now() - cutoffHours * 60 * 60 * 1000);
 
-  const mergeProviders = String(process.env.SPORTS_REALTIME_MERGE_PROVIDERS || 'opticodds,theoddsapi')
-    .split(',')
-    .map((provider) => provider.trim().toLowerCase())
-    .filter(Boolean);
+  const providerFilter = options.provider
+    ? { provider: options.provider }
+    : { provider: { $in: ['theoddsapi', 'opticodds', 'sportmonks'] } };
 
   const events = await SportsAutoEvent.find({
-    provider: { $in: mergeProviders },
+    ...providerFilter,
     isActive: true,
     completed: { $ne: true },
     status: { $in: ['UPCOMING', 'LIVE', 'UNKNOWN'] },
@@ -473,7 +380,6 @@ export async function mergeOfficialScoresIntoOddsEvents(options = {}) {
     checked: events.length,
     updated: 0,
     skipped: 0,
-    providers: mergeProviders,
     errors: [],
   };
 
