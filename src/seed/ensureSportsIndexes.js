@@ -3,6 +3,7 @@ import SportsAutoEvent from '../models/SportsAutoEvent.js';
 import SportsAutoMarket from '../models/SportsAutoMarket.js';
 import SportsAutoBet from '../models/SportsAutoBet.js';
 import SportsSyncLog from '../models/SportsSyncLog.js';
+import SportsApiSnapshot from '../models/SportsApiSnapshot.js';
 
 await connectDB();
 await Promise.all([
@@ -10,6 +11,7 @@ await Promise.all([
   SportsAutoMarket.syncIndexes(),
   SportsAutoBet.syncIndexes(),
   SportsSyncLog.syncIndexes(),
+  SportsApiSnapshot.syncIndexes(),
 ]);
 console.log('Sports indexes ensured successfully.');
 process.exit(0);
