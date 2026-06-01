@@ -171,6 +171,54 @@ function hasRealOdds(match = {}) {
   return match.marketStatus === 'OPEN' && Array.isArray(match.mainOdds) && match.mainOdds.filter((odd) => Number(odd?.price || odd?.odds || odd?.value || 0) > 1).length >= 2;
 }
 
+function csvEnv(name, fallback = []) {
+  const raw = String(process.env[name] || '').trim();
+  const values = raw ? raw.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean) : fallback;
+  return Array.from(new Set(values));
+}
+
+function showLiveScoreOnlyEvents() {
+  // International books often show official live score cards even when odds are
+  // temporarily suspended/missing. Betting safety remains protected because
+  // selections are only placeable when an OPEN real market exists.
+  return boolEnv('SPORTS_SHOW_LIVE_SCORE_ONLY_EVENTS', true);
+}
+
+function scoreOnlySports() {
+  return csvEnv('SPORTS_SCORE_ONLY_SPORTS', ['cricket']);
+}
+
+function scoreOnlyProviders() {
+  return csvEnv('SPORTS_SCORE_ONLY_PROVIDERS', ['sportmonks', 'apisports', 'opticodds']);
+}
+
+function matchSportKey(match = {}) {
+  return String(match.sportKey || match.categoryKey || match.category?.key || match.sport || match.sportTitle || '').toLowerCase();
+}
+
+function isAllowedLiveScoreOnlyMatch(match = {}, statusQuery = 'all') {
+  if (!showLiveScoreOnlyEvents()) return false;
+  if (!matchPassesStatusQuery(match, 'live')) return false;
+  const normalizedStatus = normalizeListStatus(statusQuery || 'all');
+  if (normalizedStatus !== 'live' && normalizedStatus !== 'all') return false;
+
+  const sport = matchSportKey(match);
+  const allowedSports = scoreOnlySports();
+  if (allowedSports.length && !allowedSports.some((item) => sport.includes(item) || item.includes(sport))) return false;
+
+  const provider = String(match.provider || match.rawProvider || '').toLowerCase();
+  const allowedProviders = scoreOnlyProviders();
+  if (allowedProviders.length && provider && !allowedProviders.includes(provider)) return false;
+
+  return true;
+}
+
+function shouldBypassOddsGateForLiveScores(statusQuery = 'all') {
+  if (!showLiveScoreOnlyEvents()) return false;
+  const normalizedStatus = normalizeListStatus(statusQuery || 'all');
+  return normalizedStatus === 'live' || normalizedStatus === 'all';
+}
+
 function shouldSyncOnRequest() {
   const value = process.env.SPORTS_AUTO_SYNC_ON_REQUEST;
   // Production default: never start a heavy provider sync from a public web/API request.
@@ -770,6 +818,8 @@ function formatAutoEventFromMarket(event, market = null) {
   return {
     _id: event._id,
     id: event._id,
+    provider: event.provider || '',
+    rawProvider: event.provider || '',
     providerEventId: event.providerEventId,
     sport: event.sportTitle || event.sportKey || category.displayName || 'Sports',
     sportTitle: event.sportTitle || event.sportKey || category.displayName || 'Sports',
@@ -964,7 +1014,7 @@ export async function buildSportsOverviewPayload({ limit = Number(process.env.SP
   const scanLimit = Math.min(1500, Math.max(boundedLimit * 20, Number(requestedScanLimit || process.env.SPORTS_OVERVIEW_SCAN_LIMIT || 600)));
 
   let eventFilter = visibleEventFilter();
-  if (requireRealOddsForList()) {
+  if (requireRealOddsForList() && !shouldBypassOddsGateForLiveScores('all')) {
     const provider = sportsProviderName();
     const marketEventIds = await SportsAutoMarket.distinct('event', {
       ...(shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter(provider)),
@@ -981,7 +1031,9 @@ export async function buildSportsOverviewPayload({ limit = Number(process.env.SP
     .lean();
 
   const matches = await formatAutoEvents(events);
-  const visibleMatches = requireRealOddsForList() ? matches.filter(hasRealOdds) : matches;
+  const visibleMatches = requireRealOddsForList()
+    ? matches.filter((match) => hasRealOdds(match) || isAllowedLiveScoreOnlyMatch(match, 'all'))
+    : matches;
 
   const sportsMap = new Map();
   visibleMatches.forEach((match) => {
@@ -1096,7 +1148,7 @@ export async function buildLiveMatchesPayload({ sportQuery = '', statusQuery = '
     ];
   }
 
-  if (requireRealOddsForList()) {
+  if (requireRealOddsForList() && !shouldBypassOddsGateForLiveScores(normalizedStatusQuery)) {
     const provider = sportsProviderName();
     const marketFilter = {
       ...(shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter(provider)),
@@ -1116,7 +1168,9 @@ export async function buildLiveMatchesPayload({ sportQuery = '', statusQuery = '
 
   if (autoEvents.length) {
     let matches = await formatAutoEvents(autoEvents);
-    if (requireRealOddsForList()) matches = matches.filter(hasRealOdds);
+    if (requireRealOddsForList()) {
+      matches = matches.filter((match) => hasRealOdds(match) || isAllowedLiveScoreOnlyMatch(match, normalizedStatusQuery));
+    }
     matches = matches.filter((match) => matchPassesStatusQuery(match, normalizedStatusQuery));
     const total = matches.length;
     const paged = matches.slice(skip, skip + boundedLimit);
