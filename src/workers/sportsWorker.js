@@ -24,6 +24,7 @@ const { connectDB } = await import('../config/db.js');
 const { startSportsBackgroundScheduler, stopSportsBackgroundScheduler } = await import('../services/sportsBackgroundScheduler.js');
 const { syncSportsAll } = await import('../services/freeSportsProviderService.js');
 const { settleOpenSportsBets } = await import('../services/sportsBettingService.js');
+const { prebuildSportsSnapshots } = await import('../services/sportsSnapshotBuilderService.js');
 
 await connectDB();
 console.log('[sports-worker] connected to MongoDB');
@@ -32,6 +33,8 @@ if (String(process.env.SPORTS_WORKER_RUN_INITIAL_SYNC || 'true').toLowerCase() =
   try {
     const result = await syncSportsAll({ force: true });
     console.log('[sports-worker] initial sync result:', JSON.stringify(result));
+    const snapshotResult = await prebuildSportsSnapshots('worker-initial-sync');
+    console.log('[sports-worker] initial snapshot result:', JSON.stringify(snapshotResult));
   } catch (error) {
     console.warn('[sports-worker] initial sync failed:', error?.message || error);
   }
