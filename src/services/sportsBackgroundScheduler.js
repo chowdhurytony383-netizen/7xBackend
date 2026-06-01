@@ -2,12 +2,15 @@ import { env } from '../config/env.js';
 import { syncSportsAll, syncSportsScores } from './freeSportsProviderService.js';
 import { settleOpenSportsBets } from './sportsBettingService.js';
 import { startOpticOddsLiveScoreService, stopOpticOddsLiveScoreService } from './opticOddsLiveScoreStreamService.js';
+import { prebuildSportsSnapshots } from './sportsSnapshotBuilderService.js';
 
 let schedulerStarted = false;
 let syncTimer = null;
 let settlementTimer = null;
+let snapshotTimer = null;
 let syncRunning = false;
 let settlementRunning = false;
+let snapshotRunning = false;
 
 function boolEnv(name, fallback = false) {
   const value = process.env[name];
@@ -60,6 +63,24 @@ async function runSettlementCycle(reason = 'timer') {
   }
 }
 
+async function runSnapshotCycle(reason = 'timer') {
+  if (snapshotRunning) return { skipped: true, reason: 'sports snapshot build already running' };
+  if (!boolEnv('SPORTS_SNAPSHOT_ENABLED', true)) return { skipped: true, reason: 'sports snapshots disabled' };
+  snapshotRunning = true;
+  try {
+    const result = await prebuildSportsSnapshots(reason);
+    if (boolEnv('SPORTS_BACKGROUND_LOGS', false) || boolEnv('SPORTS_SNAPSHOT_LOGS', false)) {
+      console.log(`[sports] snapshot prebuild complete (${reason})`, JSON.stringify(result));
+    }
+    return result;
+  } catch (error) {
+    console.warn(`[sports] snapshot prebuild failed (${reason}):`, error?.message || error);
+    return { failed: true, message: error?.message || String(error) };
+  } finally {
+    snapshotRunning = false;
+  }
+}
+
 export function startSportsBackgroundScheduler() {
   if (schedulerStarted) return false;
   if (!env.SPORTS_AUTO_SYSTEM_ENABLED) return false;
@@ -71,31 +92,37 @@ export function startSportsBackgroundScheduler() {
 
   const syncEveryMs = intervalMs('SPORTS_BACKGROUND_SYNC_SECONDS', 30, 10);
   const settlementEveryMs = intervalMs('SPORTS_BACKGROUND_SETTLEMENT_SECONDS', 60, 20);
+  const snapshotEveryMs = intervalMs('SPORTS_SNAPSHOT_PREBUILD_SECONDS', 30, 10);
 
-  syncTimer = setInterval(() => runSyncCycle('interval'), syncEveryMs);
+  syncTimer = setInterval(() => runSyncCycle('interval').finally(() => runSnapshotCycle('after-sync')), syncEveryMs);
   settlementTimer = setInterval(() => runSettlementCycle('interval'), settlementEveryMs);
+  snapshotTimer = setInterval(() => runSnapshotCycle('interval'), snapshotEveryMs);
 
   if (boolEnv('SPORTS_BACKGROUND_RUN_ON_START', isSportsWorkerProcess())) {
-    setTimeout(() => runSyncCycle('startup'), 1500).unref?.();
+    setTimeout(() => runSyncCycle('startup').finally(() => runSnapshotCycle('after-startup-sync')), 1500).unref?.();
     setTimeout(() => runSettlementCycle('startup'), 5000).unref?.();
+    setTimeout(() => runSnapshotCycle('startup'), 7000).unref?.();
   }
 
   syncTimer.unref?.();
   settlementTimer.unref?.();
+  snapshotTimer.unref?.();
 
   startOpticOddsLiveScoreService().catch((error) => {
     console.warn('[sports] opticodds live score service failed to start:', error?.message || error);
   });
 
-  console.log(`[sports] background scheduler active. sync=${Math.round(syncEveryMs / 1000)}s settlement=${Math.round(settlementEveryMs / 1000)}s`);
+  console.log(`[sports] background scheduler active. sync=${Math.round(syncEveryMs / 1000)}s settlement=${Math.round(settlementEveryMs / 1000)}s snapshots=${Math.round(snapshotEveryMs / 1000)}s`);
   return true;
 }
 
 export function stopSportsBackgroundScheduler() {
   if (syncTimer) clearInterval(syncTimer);
   if (settlementTimer) clearInterval(settlementTimer);
+  if (snapshotTimer) clearInterval(snapshotTimer);
   stopOpticOddsLiveScoreService();
   syncTimer = null;
   settlementTimer = null;
+  snapshotTimer = null;
   schedulerStarted = false;
 }
