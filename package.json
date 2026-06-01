@@ -24,7 +24,7 @@
     "sports:worker": "node src/workers/sportsWorker.js",
     "sports:worker:opticodds": "SPORTS_PROCESS_ROLE=worker SPORTS_PROVIDER=opticodds SPORTS_ODDS_PROVIDER=opticodds OPTICODDS_DEFAULT_SPORTS=all node src/workers/sportsWorker.js",
     "sports:indexes": "node src/seed/ensureSportsIndexes.js",
-    "sports:snapshots": "node src/seed/prebuildSportsSnapshots.js"
+    "devices:indexes": "node src/seed/ensureUserDeviceIndexes.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
