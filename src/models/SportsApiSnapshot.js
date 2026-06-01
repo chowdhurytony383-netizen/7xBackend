@@ -6,7 +6,10 @@ const SportsApiSnapshotSchema = new mongoose.Schema(
     key: { type: String, required: true, index: true },
     payload: { type: mongoose.Schema.Types.Mixed, required: true },
     builtAt: { type: Date, default: Date.now, index: true },
-    expiresAt: { type: Date, required: true, index: true },
+    // Do not set index: true here. The TTL index below owns this key.
+    // Having both a normal index and a TTL index on expiresAt creates MongoDB
+    // IndexOptionsConflict when an old non-TTL expiresAt_1 index already exists.
+    expiresAt: { type: Date, required: true },
     source: { type: String, default: 'sports-worker' },
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
@@ -17,6 +20,6 @@ const SportsApiSnapshotSchema = new mongoose.Schema(
   }
 );
 
-SportsApiSnapshotSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+SportsApiSnapshotSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expiresAt_1' });
 
 export default mongoose.models.SportsApiSnapshot || mongoose.model('SportsApiSnapshot', SportsApiSnapshotSchema);
