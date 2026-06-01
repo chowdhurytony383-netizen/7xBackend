@@ -6,6 +6,7 @@ import CrashBet from '../models/CrashBet.js';
 import SportsAutoBet from '../models/SportsAutoBet.js';
 import JiliTransaction from '../models/JiliTransaction.js';
 import ProviderWalletTxn from '../models/ProviderWalletTxn.js';
+import UserDevice from '../models/UserDevice.js';
 import Game from '../models/Game.js';
 import Agent from '../models/Agent.js';
 import AgentPaymentRequest from '../models/AgentPaymentRequest.js';
@@ -315,7 +316,7 @@ export const userDetails = asyncHandler(async (req, res) => {
     ? { $or: [{ user: user._id }, { username: jiliUsernamePattern }] }
     : { user: user._id };
 
-  const [verification, bets, crashBets, sportsBets, jiliTransactions, providerWalletTxns, transactions] = await Promise.all([
+  const [verification, bets, crashBets, sportsBets, jiliTransactions, providerWalletTxns, transactions, devices] = await Promise.all([
     Verification.findOne({ user: user._id }),
     Bet.find({ user: user._id }).populate('game', 'name displayName image').sort({ createdAt: -1 }).limit(150),
     CrashBet.find({ user: user._id }).sort({ createdAt: -1 }).limit(150),
@@ -323,6 +324,7 @@ export const userDetails = asyncHandler(async (req, res) => {
     JiliTransaction.find(jiliFilter).sort({ createdAt: -1 }).limit(200),
     ProviderWalletTxn.find({ userId: { $in: providerUserIds } }).sort({ createdAt: -1 }).limit(200),
     Transaction.find({ user: user._id }).sort({ createdAt: -1 }).limit(150),
+    UserDevice.find({ user: user._id }).sort({ lastSeenAt: -1 }).limit(50).lean(),
   ]);
 
   const gameplayRecords = [
@@ -351,6 +353,8 @@ export const userDetails = asyncHandler(async (req, res) => {
       gameplaySummary,
       gameplay: { summary: gameplaySummary, records: gameplayRecords },
       transactions,
+      devices,
+      userDevices: devices,
     },
   });
 });
@@ -574,4 +578,17 @@ export const updateGame = asyncHandler(async (req, res) => {
   if (req.body.sortOrder !== undefined) game.sortOrder = Number(req.body.sortOrder) || 0;
   await game.save();
   res.json({ success: true, message: 'Game updated', data: game });
+});
+
+
+export const userDevices = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.userId).select('_id fullName name email userId username');
+  assertOrThrow(user, 'User not found', 404);
+
+  const devices = await UserDevice.find({ user: user._id })
+    .sort({ lastSeenAt: -1 })
+    .limit(100)
+    .lean();
+
+  res.json({ success: true, data: devices, devices });
 });
