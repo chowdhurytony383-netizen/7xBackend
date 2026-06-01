@@ -12,6 +12,7 @@ import {
   updateUserPermissions,
   transferUserBalanceToAgent,
   updateWithdrawalStatus,
+  userDevices,
   userDetails,
   users,
   withdrawals,
@@ -23,6 +24,7 @@ const router = express.Router();
 router.use(protect, requireAdmin);
 router.get('/overview', overview);
 router.get('/users', users);
+router.get('/users/:userId/devices', userDevices);
 router.get('/users/:userId', userDetails);
 router.patch('/users/:userId', updateUser);
 router.patch('/users/:userId/status', updateUserStatus);

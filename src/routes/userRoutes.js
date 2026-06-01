@@ -20,6 +20,7 @@ import {
 import { getDayWiseWalletStats } from '../controllers/userStatsController.js';
 import { getMyVerification, submitVerification, updateVerification } from '../controllers/verificationController.js';
 import { protect } from '../middleware/auth.js';
+import { trackDeviceInfo } from '../controllers/deviceController.js';
 import { profilePictureUpload, verificationUpload } from '../middleware/upload.js';
 
 const router = express.Router();
@@ -31,6 +32,7 @@ router.post('/logout', logout);
 router.post('/refresh-token', refreshToken);
 router.get('/is-auth', protect, isAuthenticated);
 router.get('/my-details', protect, myDetails);
+router.post('/device-info', protect, trackDeviceInfo);
 router.patch('/update-user-details', protect, updateProfile);
 router.patch('/profile-picture', protect, profilePictureUpload, updateProfilePicture);
 router.patch('/update-profile-picture', protect, profilePictureUpload, updateProfilePicture);
