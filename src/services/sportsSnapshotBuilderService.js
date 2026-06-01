@@ -82,19 +82,28 @@ async function buildOverviewSnapshots() {
   return results;
 }
 
-async function buildMatchSnapshots() {
+function matchSnapshotTtlForStatus(status = '') {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'live') return snapshotTtlSeconds('SPORTS_SNAPSHOT_LIVE_MATCHES_TTL_SECONDS', snapshotTtlSeconds('SPORTS_SNAPSHOT_MATCHES_TTL_SECONDS', 5));
+  if (normalized === 'prematch') return snapshotTtlSeconds('SPORTS_SNAPSHOT_PREMATCH_MATCHES_TTL_SECONDS', snapshotTtlSeconds('SPORTS_SNAPSHOT_MATCHES_TTL_SECONDS', 45));
+  return snapshotTtlSeconds('SPORTS_SNAPSHOT_MATCHES_TTL_SECONDS', 20);
+}
+
+async function buildMatchSnapshots(options = {}) {
   const limits = numberListEnv('SPORTS_SNAPSHOT_MATCH_LIMITS', [12, 24]);
-  const statuses = stringListEnv('SPORTS_SNAPSHOT_STATUSES', ['live', 'prematch']);
+  const statuses = Array.isArray(options.statuses) && options.statuses.length
+    ? options.statuses
+    : stringListEnv('SPORTS_SNAPSHOT_STATUSES', ['live', 'prematch']);
   const staticSports = prioritySports();
   const dynamicSports = await dynamicSportKeys();
   const sports = Array.from(new Set([...staticSports, ...dynamicSports, 'all'])).slice(0, Math.max(8, Number(process.env.SPORTS_SNAPSHOT_MAX_SPORTS || 10)));
-  const ttlSeconds = snapshotTtlSeconds('SPORTS_SNAPSHOT_MATCHES_TTL_SECONDS', 20);
   const results = [];
 
   for (const sport of sports) {
     for (const status of statuses) {
       for (const limit of limits) {
         const normalizedStatus = normalizeListStatus(status);
+        const ttlSeconds = matchSnapshotTtlForStatus(normalizedStatus);
         const sportQuery = sport === 'all' ? '' : sport;
         const payload = await buildLiveMatchesPayload({ sportQuery, statusQuery: normalizedStatus, limit, page: 1 });
         const key = sportsSnapshotKey('matches', sport || 'all', normalizedStatus, `limit-${limit}`, 'page-1');
@@ -110,18 +119,21 @@ async function buildMatchSnapshots() {
   return results;
 }
 
-export async function prebuildSportsSnapshots(reason = 'manual') {
+export async function prebuildSportsSnapshots(reason = 'manual', options = {}) {
   if (prebuildRunning) return { skipped: true, reason: 'snapshot build already running' };
   prebuildRunning = true;
   const startedAt = Date.now();
   try {
+    const includeOverview = options.includeOverview !== false;
     const [overviewKeys, matchKeys] = await Promise.all([
-      buildOverviewSnapshots(),
-      buildMatchSnapshots(),
+      includeOverview ? buildOverviewSnapshots() : Promise.resolve([]),
+      buildMatchSnapshots(options),
     ]);
     const result = {
       success: true,
       reason,
+      kind: options.kind || 'all',
+      statuses: Array.isArray(options.statuses) ? options.statuses : stringListEnv('SPORTS_SNAPSHOT_STATUSES', ['live', 'prematch']),
       overview: overviewKeys.length,
       matches: matchKeys.length,
       total: overviewKeys.length + matchKeys.length,

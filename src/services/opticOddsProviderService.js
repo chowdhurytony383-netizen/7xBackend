@@ -1467,6 +1467,65 @@ export async function syncOpticOddsOdds({ force = false } = {}) {
   return stats;
 }
 
+
+export async function syncOpticOddsLiveOdds({ force = false, limit = null } = {}) {
+  if (!opticOddsProviderConfigured()) return { skipped: true, reason: 'OPTICODDS_API_KEY missing' };
+
+  const startedAt = new Date();
+  const maxLive = Math.max(1, Number(limit || process.env.OPTICODDS_LIVE_ODDS_POLL_LIMIT || process.env.SPORTS_LIVE_ODDS_POLL_LIMIT || 80));
+  const lookbackMinutes = Math.max(1, Number(process.env.SPORTS_LIVE_ODDS_LOOKBACK_MINUTES || 240));
+  const cutoff = new Date(Date.now() - lookbackMinutes * 60 * 1000);
+
+  const events = await SportsAutoEvent.find({
+    provider: PROVIDER,
+    isActive: true,
+    completed: { $ne: true },
+    status: 'LIVE',
+    providerEventId: { $exists: true, $ne: '' },
+    $or: [
+      { lastProviderUpdate: { $exists: false } },
+      { lastProviderUpdate: { $lte: new Date(Date.now() - 1000) } },
+      { lastScoreUpdate: { $gte: cutoff } },
+    ],
+  })
+    .sort({ lastProviderUpdate: 1, commenceTime: 1 })
+    .limit(maxLive)
+    .lean();
+
+  const stats = { mode: 'opticodds_live_odds_fast', events: 0, markets: 0, errors: [] };
+
+  for (const event of events) {
+    try {
+      const fixture = {
+        ...(event.raw && typeof event.raw === 'object' ? event.raw : {}),
+        id: event.providerEventId,
+        fixture_id: event.providerEventId,
+        sport: event.sportKey,
+      };
+      const payloads = await fetchOddsPayloadsForFixture(fixture, event.sportKey || '');
+      const marketCount = await upsertOpticMarkets(event, fixture, payloads);
+      stats.events += 1;
+      stats.markets += marketCount;
+    } catch (error) {
+      stats.errors.push({ fixtureId: event.providerEventId, sport: event.sportKey, message: error?.message || String(error), status: error?.status || null });
+    }
+  }
+
+  if (bool(process.env.SPORTS_LIVE_ODDS_LOGS, false)) {
+    await SportsSyncLog.create({
+      type: 'live_odds_fast',
+      provider: PROVIDER,
+      status: stats.events ? (stats.errors.length ? 'partial' : 'success') : 'skipped',
+      message: stats.events ? 'OpticOdds live odds fast sync completed' : 'No live OpticOdds events found for fast odds sync',
+      stats,
+      startedAt,
+      finishedAt: new Date(),
+    }).catch(() => null);
+  }
+
+  return stats;
+}
+
 export async function syncOpticOddsScores({ force = false } = {}) {
   if (!opticOddsProviderConfigured()) return { skipped: true, reason: 'OPTICODDS_API_KEY missing' };
 

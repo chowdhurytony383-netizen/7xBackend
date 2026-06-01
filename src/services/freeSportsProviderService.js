@@ -8,7 +8,7 @@ import { apiSportsOddsProviderConfigured, clearApiSportsStaleEvents, syncApiSpor
 import { clearSportmonksCricketStaleEvents, getSportmonksCricketMatchDetails, sportmonksCricketConfigured, syncSportmonksCricketOdds, syncSportmonksCricketScores } from './sportmonksCricketService.js';
 import { clearSportmonksFootballStaleEvents, sportmonksFootballConfigured, syncSportmonksFootballOdds, syncSportmonksFootballScores } from './sportmonksFootballService.js';
 import { mergeOfficialScoresIntoOddsEvents } from './sportsRealtimeMergeService.js';
-import { clearOpticOddsStaleEvents, opticOddsProviderConfigured, syncOpticOddsOdds, syncOpticOddsScores } from './opticOddsProviderService.js';
+import { clearOpticOddsStaleEvents, opticOddsProviderConfigured, syncOpticOddsLiveOdds, syncOpticOddsOdds, syncOpticOddsScores } from './opticOddsProviderService.js';
 
 const THE_ODDS_API_BASE = 'https://api.the-odds-api.com/v4';
 const DEFAULT_SPORT_KEYS = [
@@ -1010,6 +1010,14 @@ export async function syncSportsOdds({ force = false } = {}) {
     });
 
   return oddsSyncPromise;
+}
+
+
+export async function syncSportsLiveOdds({ force = false, limit = null } = {}) {
+  if (useOpticOddsProvider() && opticOddsProviderConfigured()) {
+    return syncOpticOddsLiveOdds({ force, limit });
+  }
+  return { skipped: true, reason: 'Fast live odds sync is only implemented for OpticOdds provider' };
 }
 
 export async function syncSportsScores({ force = false } = {}) {
