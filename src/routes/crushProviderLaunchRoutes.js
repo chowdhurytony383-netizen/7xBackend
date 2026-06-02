@@ -1,8 +1,6 @@
 import express from 'express';
 import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
-import { env } from '../config/env.js';
+import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -14,59 +12,7 @@ const OPERATOR_ID = process.env.CRUSH_OPERATOR_ID || 'sevenxbet';
 const API_KEY = process.env.CRUSH_API_KEY || 'sevenxbet_public_key';
 const API_SECRET = process.env.CRUSH_API_SECRET;
 
-function getAuthToken(req) {
-  const authHeader = req.headers.authorization || '';
-
-  if (authHeader.startsWith('Bearer ')) {
-    return authHeader.slice(7);
-  }
-
-  return (
-    req.cookies?.token ||
-    req.cookies?.authToken ||
-    req.cookies?.accessToken ||
-    req.cookies?.jwt ||
-    null
-  );
-}
-
-async function getLoggedInUser(req) {
-  if (req.user?._id) {
-    return req.user;
-  }
-
-  const token = getAuthToken(req);
-
-  if (!token) {
-    return null;
-  }
-
-  const secret =
-    process.env.JWT_SECRET ||
-    env.JWT_SECRET ||
-    env.ACCESS_TOKEN_SECRET ||
-    process.env.ACCESS_TOKEN_SECRET;
-
-  if (!secret) {
-    throw new Error('JWT secret is not configured.');
-  }
-
-  const decoded = jwt.verify(token, secret);
-
-  const userId =
-    decoded.id ||
-    decoded._id ||
-    decoded.userId ||
-    decoded.sub;
-
-  if (!userId) {
-    return null;
-  }
-
-  return User.findById(userId).lean();
-}
-
-router.post('/launch', async (req, res) => {
+router.post('/launch', protect, async (req, res) => {
   try {
     if (!API_SECRET) {
       return res.status(500).json({
@@ -75,20 +21,22 @@ router.post('/launch', async (req, res) => {
       });
     }
 
-    const user = await getLoggedInUser(req);
+    const user = req.user;
 
-    if (!user) {
+    if (!user?._id) {
       return res.status(401).json({
         success: false,
         message: 'Please login first.',
       });
     }
 
+    const frontendUrl = (process.env.FRONTEND_URL || process.env.CLIENT_URL || 'https://7xbet.asia').replace(/\/+$/, '');
+
     const body = {
       userId: String(user._id),
       username: user.username || user.name || user.email || 'Player',
       currency: user.currency || 'BDT',
-      returnUrl: 'https://7xbet.asia/crash',
+      returnUrl: `${frontendUrl}/crash`,
     };
 
     const rawBody = JSON.stringify(body);
@@ -111,12 +59,17 @@ router.post('/launch', async (req, res) => {
       body: rawBody,
     });
 
-    const data = await response.json();
+    let data = {};
+    try {
+      data = await response.json();
+    } catch (_) {
+      data = {};
+    }
 
     if (!response.ok || !data.ok) {
-      return res.status(400).json({
+      return res.status(response.status >= 400 && response.status < 500 ? 400 : 502).json({
         success: false,
-        message: data.message || 'Game launch failed.',
+        message: data.message || data.error || 'Game launch failed.',
         providerResponse: data,
       });
     }
@@ -130,9 +83,12 @@ router.post('/launch', async (req, res) => {
   } catch (error) {
     console.error('7X Crush launch error:', error);
 
-    return res.status(500).json({
+    const isJwtExpired = error?.name === 'TokenExpiredError' || /jwt expired/i.test(error?.message || '');
+    const isJwtInvalid = error?.name === 'JsonWebTokenError' || /jwt malformed|invalid token/i.test(error?.message || '');
+
+    return res.status(isJwtExpired || isJwtInvalid ? 401 : 500).json({
       success: false,
-      message: error.message || 'Game launch failed.',
+      message: isJwtExpired ? 'Session expired. Please try again.' : (error.message || 'Game launch failed.'),
     });
   }
 });
