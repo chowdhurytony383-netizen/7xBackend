@@ -1,4 +1,4 @@
-import { defaultCountry, findCountryByCode, findCountryByName, normalizeCountry } from './countries.js';
+import { defaultCountry, findCountryByCode, findCountryByName, normalizeCountry, currencyForCountry } from './countries.js';
 
 const COUNTRY_HEADER_NAMES = [
   'cf-ipcountry',
@@ -47,5 +47,5 @@ export function resolveRegistrationCountry(req) {
 }
 
 export function currencyForResolvedCountry(country) {
-  return String(country?.currency || defaultCountry.currency || 'BDT').toUpperCase();
+  return currencyForCountry(country || defaultCountry);
 }

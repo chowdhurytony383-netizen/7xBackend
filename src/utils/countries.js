@@ -1495,24 +1495,57 @@ export const countries = [
   }
 ];
 
+
+export const fallbackCurrency = 'USD';
+
+// Currencies enabled for the website. If a user's country currency is not here,
+// the website will safely fall back to USD.
+// Add/remove codes here when you enable a new currency in payment/game providers.
+export const supportedCurrencies = [
+  'USD',
+  'BDT', 'INR', 'PKR', 'NPR', 'LKR', 'BTN',
+  'AED', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR',
+  'MYR', 'SGD', 'PHP', 'IDR', 'THB', 'VND', 'KHR', 'LAK', 'MMK',
+  'CNY', 'HKD', 'TWD', 'KRW',
+  'EUR', 'CAD', 'AUD', 'NZD',
+  'BRL', 'MXN', 'PEN', 'CLP', 'COP', 'ARS',
+  'NGN', 'GHS', 'KES', 'TZS', 'UGX', 'ZAR', 'XAF', 'XOF', 'MAD', 'EGP',
+];
+
+export function isSupportedCurrency(currency) {
+  const code = String(currency || '').trim().toUpperCase();
+  return Boolean(code) && supportedCurrencies.includes(code);
+}
+
+export function resolveAvailableCurrency(currency, fallback = fallbackCurrency) {
+  const code = String(currency || '').trim().toUpperCase();
+  if (isSupportedCurrency(code)) return code;
+
+  const fallbackCode = String(fallback || fallbackCurrency).trim().toUpperCase();
+  return isSupportedCurrency(fallbackCode) ? fallbackCode : fallbackCurrency;
+}
+
 export const defaultCountry = countries.find((country) => country.code === 'BD') || countries[0];
 
 export function findCountryByCode(code) {
-  return countries.find((country) => country.code === code) || null;
+  const normalized = String(code || '').trim().toUpperCase();
+  return countries.find((country) => country.code === normalized) || null;
 }
 
 export function findCountryByName(name) {
-  return countries.find((country) => country.name === name) || null;
+  const normalized = String(name || '').trim().toLowerCase();
+  return countries.find((country) => String(country.name || '').toLowerCase() === normalized) || null;
 }
 
 export function normalizeCountry(input) {
   if (!input) return defaultCountry;
   const value = String(input).trim();
-  return findCountryByCode(value.toUpperCase()) || findCountryByName(value) || defaultCountry;
+  return findCountryByCode(value) || findCountryByName(value) || defaultCountry;
 }
 
 export function currencyForCountry(input) {
-  return normalizeCountry(input).currency || 'USD';
+  const country = typeof input === 'object' && input ? input : normalizeCountry(input);
+  return resolveAvailableCurrency(country?.currency, fallbackCurrency);
 }
 
 export function countryFromLocale(locale) {
