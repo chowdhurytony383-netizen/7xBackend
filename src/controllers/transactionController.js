@@ -13,6 +13,7 @@ import { env } from '../config/env.js';
 import { groupDepositMethodsByTitle, pickPrimaryDepositMethod } from '../utils/paymentMethodCanonical.js';
 import { assertUserCanDeposit, assertUserCanWithdraw } from '../utils/userPermissions.js';
 import { assertWithdrawalAllowedForUser } from '../services/withdrawalGuardService.js';
+import { assertWithdrawMethodMatchesTopDeposit } from '../services/withdrawalPaymentMethodRuleService.js';
 import { getFirstDepositBonusSummary, rejectFirstDepositBonusForUser, safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
 import { getSignupBonusSummary, rejectSignupBonusForUser } from '../services/signupBonusService.js';
 import { handleSuccessfulDepositForReferral } from '../services/referralRewardService.js';
@@ -46,6 +47,14 @@ export const createWithdrawTransaction = asyncHandler(async (req, res) => {
   const type = String(req.body.type || 'WITHDRAW').toUpperCase();
   assertOrThrow(type === 'WITHDRAW', 'Only WITHDRAW transactions can be created here', 400);
   const method = optionalString(req.body.method, 40) || 'upi';
+
+  await assertWithdrawMethodMatchesTopDeposit({
+    userId: req.user._id,
+    scope: 'manual',
+    methodKey: method,
+    method,
+    title: method,
+  });
 
   await assertWithdrawalAllowedForUser(req.user, amount);
 
@@ -581,6 +590,14 @@ export const createAgentWithdrawRequest = asyncHandler(async (req, res) => {
   assertOrThrow(globalMethod, 'Withdrawal method is not active', 404);
   assertOrThrow(amount >= Number(globalMethod.minAmount || 1), `Minimum amount is ${globalMethod.minAmount}`, 400);
   assertOrThrow(amount <= Number(globalMethod.maxAmount || 1_000_000), `Maximum amount is ${globalMethod.maxAmount}`, 400);
+
+  await assertWithdrawMethodMatchesTopDeposit({
+    userId: req.user._id,
+    scope: 'manual',
+    methodKey,
+    method: `agent-${methodKey}`,
+    title: globalMethod.title || methodKey,
+  });
 
   let agent;
   if (agentId) {
