@@ -9,6 +9,7 @@ import { syncDefaultCryptoMethods } from './cryptoAddressService.js';
 import { getDefaultCryptoMethod } from './cryptoConfig.js';
 import { tatumRequest } from './tatumService.js';
 import { assertWithdrawalAllowedForUser } from './withdrawalGuardService.js';
+import { assertWithdrawMethodMatchesTopDeposit } from './withdrawalPaymentMethodRuleService.js';
 
 function nowDate() {
   return new Date();
@@ -303,6 +304,13 @@ export async function createCryptoWithdrawalRequest({ user, amountFiat, methodKe
 
   assertOrThrow(amount >= minAmount, `Minimum withdraw amount is ${minAmount}`, 400);
   assertOrThrow(amount <= maxAmount, `Maximum withdraw amount is ${maxAmount}`, 400);
+  await assertWithdrawMethodMatchesTopDeposit({
+    userId: user._id,
+    scope: 'crypto',
+    methodKey: key,
+    method: `crypto-${key}`,
+    title: method.displayName || key,
+  });
   await assertWithdrawalAllowedForUser(user, amount);
   assertOrThrow((user.wallet || 0) >= amount, 'Insufficient wallet balance', 400);
 
