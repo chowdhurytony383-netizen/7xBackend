@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import express from 'express';
-import { protect } from '../middleware/auth.js';
+import { protect, requireAdmin } from '../middleware/auth.js';
 import {
   acceptJiliBet,
   acceptJiliSessionBet,
@@ -9,6 +9,7 @@ import {
   cancelJiliSessionBet,
   launchJiliGame,
   listJiliGames,
+  syncJiliGames,
 } from '../controllers/jiliController.js';
 import { env } from '../config/env.js';
 
@@ -47,6 +48,9 @@ router.post('/launch/:gameId', protect, launchJiliGame);
 // Public game list API: visitors can browse JILI games before login.
 // Launch/play routes remain protected so only logged-in users can open a game.
 router.get('/games', listJiliGames);
+
+// Admin-only manual sync API. This button should be used from main Admin panel only.
+router.post('/sync-games', protect, requireAdmin, syncJiliGames);
 
 // JILI operator callback APIs.
 router.post('/auth', verifyBasicAuth, authJiliPlayer);
