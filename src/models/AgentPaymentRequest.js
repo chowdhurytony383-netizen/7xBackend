@@ -73,6 +73,12 @@ const agentPaymentRequestSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  transactionRefNormalized: {
+    type: String,
+    default: '',
+    uppercase: true,
+    index: true,
+  },
   receiverNumber: {
     type: String,
     default: '',

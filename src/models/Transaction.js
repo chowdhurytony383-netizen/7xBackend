@@ -24,6 +24,8 @@ const transactionSchema = new mongoose.Schema({
   currency: { type: String, trim: true, uppercase: true, default: '' },
   balanceType: { type: String, enum: ['MAIN', 'BONUS'], default: 'MAIN', index: true },
   userNote: { type: String, default: '' },
+  transactionRef: { type: String, default: '', trim: true, index: true },
+  transactionRefNormalized: { type: String, default: '', trim: true, uppercase: true, index: true },
   agentNote: { type: String, default: '' },
 }, { timestamps: true });
 
