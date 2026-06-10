@@ -1,5 +1,6 @@
 import http from 'http';
 import app from './app.js';
+import { startLuckyWheelNotificationWorker } from './services/pushNotificationService.js';
 import { connectDB } from './config/db.js';
 import { env } from './config/env.js';
 import { initRealtimeSockets } from './socket/index.js';
@@ -47,3 +48,5 @@ async function start() {
 }
 
 start();
+
+startLuckyWheelNotificationWorker();

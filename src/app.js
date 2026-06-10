@@ -43,7 +43,6 @@ import adminNotificationRoutes from './routes/adminNotificationRoutes.js';
 import vipRoutes from './routes/vipRoutes.js';
 import adminVipRoutes from './routes/adminVipRoutes.js';
 import freeSpinRoutes from './routes/freeSpinRoutes.js';
-import pgsoftRoutes from './routes/pgsoftRoutes.js';
 
 // 7X Crush provider launch route
 import crushProviderLaunchRoutes from './routes/crushProviderLaunchRoutes.js';
@@ -135,7 +134,6 @@ app.use('/api/support', supportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/vip', vipRoutes);
 app.use('/api/free-spin', freeSpinRoutes);
-app.use('/api/pgsoft', pgsoftRoutes);
 app.use('/api/bet', betRoutes);
 
 // 7X Crush provider launch API
