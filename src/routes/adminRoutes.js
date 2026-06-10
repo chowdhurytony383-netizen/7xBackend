@@ -3,6 +3,7 @@ import {
   deposits,
   games,
   overview,
+  realtimePresence,
   transactions,
   updateDepositStatus,
   updateGame,
@@ -23,6 +24,7 @@ import { protect, requireAdmin } from '../middleware/auth.js';
 const router = express.Router();
 router.use(protect, requireAdmin);
 router.get('/overview', overview);
+router.get('/presence', realtimePresence);
 router.get('/users', users);
 router.get('/users/:userId/devices', userDevices);
 router.get('/users/:userId', userDetails);
