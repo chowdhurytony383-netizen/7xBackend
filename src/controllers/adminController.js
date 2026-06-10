@@ -17,6 +17,7 @@ import { optionalString, requireNumber, requireString } from '../utils/validatio
 import { creditWallet } from '../utils/wallet.js';
 import { sanitizeUser } from '../utils/sanitize.js';
 import { safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
+import { getAdminPresenceSnapshot } from '../services/presenceService.js';
 import { handleSuccessfulDepositForReferral } from '../services/referralRewardService.js';
 
 
@@ -591,4 +592,10 @@ export const userDevices = asyncHandler(async (req, res) => {
     .lean();
 
   res.json({ success: true, data: devices, devices });
+});
+
+
+export const realtimePresence = asyncHandler(async (_req, res) => {
+  const snapshot = await getAdminPresenceSnapshot();
+  res.json({ success: true, data: snapshot });
 });
