@@ -297,10 +297,12 @@ function normalizeJiliProviderGame(raw = {}, index = 0) {
   const slug = `jili-${slugifyJiliGame(name)}-${numericGameId}`;
   const gameCode = `jili-${numericGameId}`;
   const sorting = Number(raw.Sorting ?? raw.sorting ?? raw.Sort ?? raw.sortOrder ?? raw.config?.providerGame?.Sorting ?? 1000 + index);
-  const image = pickJiliImage(raw) || FALLBACK_JILI_IMAGES[categoryInfo.category] || FALLBACK_JILI_IMAGES.casino;
+  const providerImage = pickJiliImage(raw);
+  const image = providerImage || FALLBACK_JILI_IMAGES[categoryInfo.category] || FALLBACK_JILI_IMAGES.casino;
 
   return {
     gameId: numericGameId,
+    providerImage,
     name,
     slug,
     gameCode,
@@ -334,13 +336,16 @@ async function syncJiliGamesFromProvider({ deactivateStale = false } = {}) {
   let updated = 0;
 
   for (const game of uniqueGames) {
+    const existingGame = await Game.findOne({ gameCode: game.gameCode }).select('_id image').lean();
+    const preservedImage = existingGame?.image && !game.providerImage ? existingGame.image : game.image;
+
     const payload = {
       name: game.slug,
       slug: game.slug,
       displayName: `JILI ${game.name}`,
       gameCode: game.gameCode,
       description: `${game.categoryLabel} game from JILI Seamless Wallet. Balance is settled through single wallet callbacks.`,
-      image: game.image,
+      image: preservedImage,
       category: game.category,
       type: 'provider',
       distribution: 'provider',
@@ -358,17 +363,17 @@ async function syncJiliGamesFromProvider({ deactivateStale = false } = {}) {
         freeSpin: game.freeSpin,
         providerGame: game.raw,
         syncedAt: new Date(),
+        imageSourcePreserved: Boolean(existingGame?.image && !game.providerImage),
       },
     };
 
-    const before = await Game.findOne({ gameCode: game.gameCode }).select('_id').lean();
     await Game.findOneAndUpdate(
       { gameCode: game.gameCode },
       { $set: payload },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    if (before) updated += 1;
+    if (existingGame) updated += 1;
     else inserted += 1;
   }
 
