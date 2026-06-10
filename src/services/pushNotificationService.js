@@ -152,6 +152,109 @@ export async function sendLuckyWheelReadyNotificationToUser(userId) {
   return results;
 }
 
+async function sendWebPushNotificationToToken(tokenDoc, {
+  title,
+  body,
+  url = '/',
+  type = 'SYSTEM',
+  tag = '7xbet-notification',
+  icon = '/icons/notification-icon.png',
+  badge = '/icons/notification-badge.png',
+  requireInteraction = false,
+} = {}) {
+  if (!env.FIREBASE_PROJECT_ID) return { skipped: true, reason: 'Firebase is not configured.' };
+
+  const accessToken = await getFirebaseAccessToken();
+  if (!accessToken) return { skipped: true, reason: 'Firebase access token unavailable.' };
+
+  const frontendUrl = String(env.FRONTEND_URL || 'https://7xbet.asia').replace(/\/$/, '');
+  const targetUrl = String(url || '/').startsWith('http') ? String(url) : `${frontendUrl}${String(url || '/').startsWith('/') ? '' : '/'}${url || '/'}`;
+
+  const message = {
+    message: {
+      token: tokenDoc.token,
+      notification: {
+        title,
+        body,
+      },
+      data: {
+        type,
+        url: String(url || '/'),
+      },
+      webpush: {
+        fcm_options: {
+          link: targetUrl,
+        },
+        notification: {
+          title,
+          body,
+          icon,
+          badge,
+          tag,
+          renotify: true,
+          requireInteraction,
+        },
+      },
+    },
+  };
+
+  const response = await fetch(`https://fcm.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/messages:send`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(message),
+  });
+
+  if (response.status === 404 || response.status === 400) {
+    const text = await response.text().catch(() => '');
+    if (/UNREGISTERED|registration-token-not-registered|not found/i.test(text)) {
+      tokenDoc.isActive = false;
+      await tokenDoc.save();
+      return { success: false, inactive: true, error: text };
+    }
+    return { success: false, error: text || `HTTP ${response.status}` };
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    return { success: false, error: text || `HTTP ${response.status}` };
+  }
+
+  tokenDoc.lastSeenAt = new Date();
+  await tokenDoc.save();
+
+  return { success: true };
+}
+
+export async function sendDepositSuccessNotificationToUser(userId, {
+  amount = 0,
+  currency = 'BDT',
+  transactionId = '',
+  url = '/wallet',
+} = {}) {
+  const tokens = await NotificationToken.find({ user: userId, isActive: true });
+  const formattedAmount = Number(amount || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const title = 'Deposit Successful';
+  const body = `Your deposit of ${String(currency || 'BDT').toUpperCase()} ${formattedAmount} has been credited successfully.`;
+
+  const results = [];
+  for (const token of tokens) {
+    results.push(await sendWebPushNotificationToToken(token, {
+      title,
+      body,
+      url,
+      type: 'DEPOSIT_SUCCESS',
+      tag: transactionId ? `deposit-success-${transactionId}` : 'deposit-success',
+      requireInteraction: false,
+    }));
+  }
+
+  return results;
+}
+
+
 export async function sendDueLuckyWheelReadyNotifications({ limit = 200 } = {}) {
   const now = new Date();
 
