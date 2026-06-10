@@ -382,12 +382,15 @@ async function syncJiliGamesFromProvider({ deactivateStale = false } = {}) {
     deactivated = result.modifiedCount || 0;
   }
 
+  const totalActiveGames = await Game.countDocuments({ provider: 'JILI', isActive: true });
+
   return {
     providerCount: providerGames.length,
     syncedCount: uniqueGames.length,
     inserted,
     updated,
     deactivated,
+    totalActiveGames,
   };
 }
 
