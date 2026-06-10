@@ -158,6 +158,17 @@ const FALLBACK_JILI_IMAGES = {
   arcade: '/images/others/banner1.png',
 };
 
+function getLocalJiliImagePath(gameId) {
+  const id = Number(gameId);
+  if (!Number.isFinite(id) || id <= 0) return '';
+  return `/images/jili/${id}.webp`;
+}
+
+function isJiliFallbackImage(value = '') {
+  const image = String(value || '').trim();
+  return Object.values(FALLBACK_JILI_IMAGES).includes(image);
+}
+
 function slugifyJiliGame(name) {
   return String(name || '')
     .toLowerCase()
@@ -298,7 +309,8 @@ function normalizeJiliProviderGame(raw = {}, index = 0) {
   const gameCode = `jili-${numericGameId}`;
   const sorting = Number(raw.Sorting ?? raw.sorting ?? raw.Sort ?? raw.sortOrder ?? raw.config?.providerGame?.Sorting ?? 1000 + index);
   const providerImage = pickJiliImage(raw);
-  const image = providerImage || FALLBACK_JILI_IMAGES[categoryInfo.category] || FALLBACK_JILI_IMAGES.casino;
+  const localImage = getLocalJiliImagePath(numericGameId);
+  const image = providerImage || localImage || FALLBACK_JILI_IMAGES[categoryInfo.category] || FALLBACK_JILI_IMAGES.casino;
 
   return {
     gameId: numericGameId,
@@ -337,7 +349,9 @@ async function syncJiliGamesFromProvider({ deactivateStale = false } = {}) {
 
   for (const game of uniqueGames) {
     const existingGame = await Game.findOne({ gameCode: game.gameCode }).select('_id image').lean();
-    const preservedImage = existingGame?.image && !game.providerImage ? existingGame.image : game.image;
+    const preservedImage = existingGame?.image && !game.providerImage && !isJiliFallbackImage(existingGame.image)
+      ? existingGame.image
+      : game.image;
 
     const payload = {
       name: game.slug,
