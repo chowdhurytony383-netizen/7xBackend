@@ -1,7 +1,13 @@
 import { Server } from 'socket.io';
 import { env } from '../config/env.js';
 import { crashEngine } from '../gameEngines/crashEngine.js';
-import { getSocketUser } from '../utils/socketAuth.js';
+import { getSocketAgent, getSocketUser } from '../utils/socketAuth.js';
+import {
+  getAdminPresenceSnapshot,
+  markAgentOnline,
+  markSocketOffline,
+  markUserOnline,
+} from '../services/presenceService.js';
 
 let realtimeIO = null;
 
@@ -28,6 +34,11 @@ export function emitToAdmins(event, payload) {
   return true;
 }
 
+async function emitPresenceToAdmins() {
+  if (!realtimeIO) return;
+  realtimeIO.to('admins').emit('presence:update', await getAdminPresenceSnapshot());
+}
+
 function parseOrigins() {
   const values = new Set();
   [env.FRONTEND_URL, process.env.CLIENT_URL, process.env.CORS_ORIGIN]
@@ -43,23 +54,53 @@ function safeAck(ack, payload) {
   if (typeof ack === 'function') ack(payload);
 }
 
-async function attachSocketUser(socket) {
+async function attachSocketIdentity(socket) {
   const user = await getSocketUser(socket);
-  if (!user) return null;
+  if (user) {
+    socket.user = user;
+    socket.agent = null;
+    socket.join(`user:${user._id}`);
 
-  socket.user = user;
-  socket.join(`user:${user._id}`);
+    const isAdmin = user.role === 'admin' || user.permissions?.includes?.('admin');
+    if (isAdmin) socket.join('admins');
 
-  const isAdmin = user.role === 'admin' || user.permissions?.includes?.('admin');
-  if (isAdmin) socket.join('admins');
+    markUserOnline(user, socket.id);
+    socket.emit('realtime:ready', {
+      success: true,
+      type: 'user',
+      userId: String(user._id),
+      isAdmin,
+    });
 
-  socket.emit('realtime:ready', {
-    success: true,
-    userId: String(user._id),
-    isAdmin,
-  });
+    await emitPresenceToAdmins();
+    return { type: 'user', user, isAdmin };
+  }
 
-  return user;
+  const agent = await getSocketAgent(socket);
+  if (agent) {
+    socket.agent = agent;
+    socket.user = null;
+    socket.join(`agent:${agent._id}`);
+    markAgentOnline(agent, socket.id);
+
+    socket.emit('realtime:ready', {
+      success: true,
+      type: 'agent',
+      agentId: String(agent._id),
+      agentCode: agent.agentId,
+      isAdmin: false,
+    });
+
+    await emitPresenceToAdmins();
+    return { type: 'agent', agent, isAdmin: false };
+  }
+
+  return null;
+}
+
+async function attachSocketUser(socket) {
+  const identity = await attachSocketIdentity(socket);
+  return identity?.user || null;
 }
 
 export async function initRealtimeSockets(server) {
@@ -78,11 +119,30 @@ export async function initRealtimeSockets(server) {
   await crashEngine.init(io);
 
   io.on('connection', async (socket) => {
-    const user = await attachSocketUser(socket);
+    const identity = await attachSocketIdentity(socket);
+    const user = identity?.user || null;
 
     socket.on('realtime:auth', async (_payload = {}, ack) => {
-      const currentUser = await attachSocketUser(socket);
-      safeAck(ack, { success: Boolean(currentUser), userId: currentUser?._id ? String(currentUser._id) : null });
+      const currentIdentity = await attachSocketIdentity(socket);
+      safeAck(ack, {
+        success: Boolean(currentIdentity),
+        type: currentIdentity?.type || null,
+        userId: currentIdentity?.user?._id ? String(currentIdentity.user._id) : null,
+        agentId: currentIdentity?.agent?._id ? String(currentIdentity.agent._id) : null,
+      });
+    });
+
+    socket.on('presence:subscribe', async (_payload = {}, ack) => {
+      const currentIdentity = await attachSocketIdentity(socket);
+      const isAdmin = currentIdentity?.isAdmin;
+      if (!isAdmin) {
+        return safeAck(ack, { success: false, message: 'Admin access required' });
+      }
+
+      socket.join('admins');
+      const snapshot = await getAdminPresenceSnapshot();
+      socket.emit('presence:update', snapshot);
+      safeAck(ack, { success: true, data: snapshot });
     });
 
     socket.on('support:join', async (_payload = {}, ack) => {
@@ -130,7 +190,16 @@ export async function initRealtimeSockets(server) {
         safeAck(ack, response);
       }
     });
+
+    socket.on('disconnect', async () => {
+      markSocketOffline(socket.id);
+      await emitPresenceToAdmins();
+    });
   });
+
+  setInterval(() => {
+    emitPresenceToAdmins().catch(() => {});
+  }, 15000).unref?.();
 
   return io;
 }
