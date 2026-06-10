@@ -1,9 +1,10 @@
 import express from 'express';
-import { endMines, getAllGames, pendingMines, revealMineTile, rollDice, startMines } from '../controllers/gameController.js';
+import { endMines, getAllGames, getHomeGameSections, pendingMines, revealMineTile, rollDice, startMines } from '../controllers/gameController.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 router.get('/get-all-games', getAllGames);
+router.get('/home-sections', getHomeGameSections);
 router.post('/dice/roll-dice', protect, rollDice);
 router.post('/mines/start-mine', protect, startMines);
 router.patch('/mines/reveal-tile', protect, revealMineTile);
