@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import JiliTransaction from '../models/JiliTransaction.js';
+import Game from '../models/Game.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { assertUserCanPlay } from '../utils/userPermissions.js';
 import { recordWagerTurnover } from '../services/withdrawalGuardService.js';
@@ -139,6 +140,281 @@ function validateCurrency(requestCurrency, playerCurrency) {
   return expected === received;
 }
 
+
+const CATEGORY_ID_MAP_FOR_SYNC = {
+  1: { category: 'slots', label: 'Slots' },
+  2: { category: 'cards', label: 'Card / Poker' },
+  3: { category: 'arcade', label: 'Arcade / Lobby' },
+  5: { category: 'fish', label: 'Fishing' },
+  8: { category: 'casino', label: 'Table / Casino' },
+};
+
+const FALLBACK_JILI_IMAGES = {
+  slots: '/images/others/banner1.png',
+  fish: '/images/others/banner2.png',
+  casino: '/images/others/banner3.png',
+  crash: '/images/others/banner4.png',
+  cards: '/images/others/banner5.png',
+  arcade: '/images/others/banner1.png',
+};
+
+function slugifyJiliGame(name) {
+  return String(name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'jili-game';
+}
+
+function pickJiliName(raw = {}) {
+  const candidates = [
+    raw.displayName,
+    raw.Name,
+    raw.GameName,
+    raw.name,
+    raw.gameName,
+    raw.title,
+    raw.config?.providerGame?.Name,
+    raw.config?.providerGame?.name,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim().replace(/^JILI\s+/i, '');
+    if (candidate && typeof candidate === 'object') {
+      const value = candidate['en-US'] || candidate.en_US || candidate.en || candidate.English || candidate['zh-CN'] || candidate['zh-TW'];
+      if (value) return String(value).trim().replace(/^JILI\s+/i, '');
+    }
+  }
+
+  return '';
+}
+
+function pickJiliGameId(raw = {}) {
+  return raw.GameId || raw.gameId || raw.GameID || raw.id || raw.game || raw.config?.gameId || raw.config?.providerGame?.GameId;
+}
+
+function pickJiliTypeText(raw = {}) {
+  return String(
+    raw.Type
+    || raw.type
+    || raw.GameType
+    || raw.gameType
+    || raw.Category
+    || raw.category
+    || raw.categoryLabel
+    || raw.GameCategoryName
+    || raw.gameCategoryName
+    || raw.config?.categoryLabel
+    || raw.config?.providerGame?.Type
+    || raw.config?.providerGame?.type
+    || raw.config?.providerGame?.Category
+    || raw.config?.providerGame?.category
+    || ''
+  ).trim();
+}
+
+function pickJiliCategoryId(raw = {}) {
+  const value = raw.GameCategoryId
+    || raw.gameCategoryId
+    || raw.categoryId
+    || raw.gameCategory
+    || raw.config?.providerGame?.GameCategoryId
+    || raw.config?.providerGame?.gameCategoryId;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function pickJiliCategoryInfo(raw = {}) {
+  const typeText = pickJiliTypeText(raw).toLowerCase();
+
+  if (typeText.includes('fish')) return { category: 'fish', label: 'Fishing' };
+  if (typeText.includes('crash') || typeText.includes('mines') || typeText.includes('plinko') || typeText.includes('limbo')) return { category: 'crash', label: 'Crash' };
+  if (typeText.includes('card') || typeText.includes('poker') || typeText.includes('rummy') || typeText.includes('teenpatti') || typeText.includes('andar')) return { category: 'cards', label: 'Card / Poker' };
+  if (typeText.includes('slot')) return { category: 'slots', label: 'Slots' };
+  if (typeText.includes('arcade') || typeText.includes('lobby')) return { category: 'arcade', label: 'Arcade / Lobby' };
+  if (typeText.includes('casino') || typeText.includes('table') || typeText.includes('bingo') || typeText.includes('roulette') || typeText.includes('baccarat') || typeText.includes('sic bo') || typeText.includes('keno')) return { category: 'casino', label: 'Table / Casino' };
+
+  return CATEGORY_ID_MAP_FOR_SYNC[pickJiliCategoryId(raw)] || { category: 'casino', label: 'Table / Casino' };
+}
+
+function boolFromJili(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  const text = String(value ?? '').toLowerCase();
+  return ['true', 'yes', 'y', '1'].includes(text);
+}
+
+function isUsableJiliImage(value) {
+  if (!value || typeof value !== 'string') return false;
+  const text = value.trim();
+  if (!text) return false;
+  if (/^(icon|download|material)$/i.test(text)) return false;
+  return /^(https?:)?\/\//i.test(text) || text.startsWith('/') || /\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(text);
+}
+
+function pickJiliImage(raw = {}) {
+  const providerGame = raw.config?.providerGame || {};
+  const candidates = [
+    raw.image,
+    raw.Image,
+    raw.icon,
+    raw.Icon,
+    raw.thumbnail,
+    raw.thumb,
+    raw.logo,
+    raw.picture,
+    raw.cover,
+    raw.banner,
+    raw.displayImage,
+    raw.imageUrl,
+    raw.iconUrl,
+    raw.IconUrl,
+    raw.GameIcon,
+    raw.gameIcon,
+    providerGame.image,
+    providerGame.Image,
+    providerGame.icon,
+    providerGame.Icon,
+    providerGame.thumbnail,
+    providerGame.imageUrl,
+    providerGame.iconUrl,
+    providerGame.IconUrl,
+    providerGame.GameIcon,
+    providerGame.gameIcon,
+  ];
+
+  const found = candidates.find(isUsableJiliImage);
+  return found ? String(found).trim() : '';
+}
+
+function normalizeJiliProviderGame(raw = {}, index = 0) {
+  const numericGameId = Number(pickJiliGameId(raw));
+  if (!Number.isFinite(numericGameId) || numericGameId <= 0) return null;
+
+  const name = pickJiliName(raw) || `JILI Game ${numericGameId}`;
+  const categoryInfo = pickJiliCategoryInfo(raw);
+  const slug = `jili-${slugifyJiliGame(name)}-${numericGameId}`;
+  const gameCode = `jili-${numericGameId}`;
+  const sorting = Number(raw.Sorting ?? raw.sorting ?? raw.Sort ?? raw.sortOrder ?? raw.config?.providerGame?.Sorting ?? 1000 + index);
+  const image = pickJiliImage(raw) || FALLBACK_JILI_IMAGES[categoryInfo.category] || FALLBACK_JILI_IMAGES.casino;
+
+  return {
+    gameId: numericGameId,
+    name,
+    slug,
+    gameCode,
+    category: categoryInfo.category,
+    categoryLabel: categoryInfo.label,
+    typeText: pickJiliTypeText(raw),
+    sortOrder: Number.isFinite(sorting) ? sorting : 1000 + index,
+    image,
+    jp: boolFromJili(raw.JP ?? raw.jp ?? raw.config?.providerGame?.JP),
+    freeSpin: boolFromJili(raw.Freespin ?? raw.FreeSpin ?? raw.freespin ?? raw.config?.providerGame?.Freespin),
+    raw,
+  };
+}
+
+async function syncJiliGamesFromProvider({ deactivateStale = false } = {}) {
+  const providerGames = await getJiliGameList();
+  const normalized = providerGames
+    .map((game, index) => normalizeJiliProviderGame(game, index))
+    .filter(Boolean);
+
+  const uniqueGames = [];
+  const seen = new Set();
+
+  for (const game of normalized) {
+    if (seen.has(game.gameId)) continue;
+    seen.add(game.gameId);
+    uniqueGames.push(game);
+  }
+
+  let inserted = 0;
+  let updated = 0;
+
+  for (const game of uniqueGames) {
+    const payload = {
+      name: game.slug,
+      slug: game.slug,
+      displayName: `JILI ${game.name}`,
+      gameCode: game.gameCode,
+      description: `${game.categoryLabel} game from JILI Seamless Wallet. Balance is settled through single wallet callbacks.`,
+      image: game.image,
+      category: game.category,
+      type: 'provider',
+      distribution: 'provider',
+      provider: 'JILI',
+      route: `/jili/${game.gameId}`,
+      isActive: true,
+      sortOrder: game.sortOrder,
+      config: {
+        provider: 'JILI',
+        gameId: game.gameId,
+        currency: env.JILI_CURRENCY || 'BDT',
+        categoryLabel: game.categoryLabel,
+        typeText: game.typeText,
+        jp: game.jp,
+        freeSpin: game.freeSpin,
+        providerGame: game.raw,
+        syncedAt: new Date(),
+      },
+    };
+
+    const before = await Game.findOne({ gameCode: game.gameCode }).select('_id').lean();
+    await Game.findOneAndUpdate(
+      { gameCode: game.gameCode },
+      { $set: payload },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    if (before) updated += 1;
+    else inserted += 1;
+  }
+
+  let deactivated = 0;
+  if (deactivateStale && uniqueGames.length) {
+    const activeCodes = uniqueGames.map((game) => game.gameCode);
+    const result = await Game.updateMany(
+      { provider: 'JILI', gameCode: { $nin: activeCodes } },
+      { $set: { isActive: false } }
+    );
+    deactivated = result.modifiedCount || 0;
+  }
+
+  return {
+    providerCount: providerGames.length,
+    syncedCount: uniqueGames.length,
+    inserted,
+    updated,
+    deactivated,
+  };
+}
+
+async function getJiliGamesFromDatabase() {
+  const rows = await Game.find({
+    provider: 'JILI',
+    isActive: true,
+  })
+    .sort({ sortOrder: 1, displayName: 1 })
+    .lean();
+
+  return rows.map((game) => ({
+    GameId: game.config?.gameId || String(game.gameCode || '').replace(/^jili-/, ''),
+    Name: String(game.displayName || '').replace(/^JILI\s+/i, ''),
+    Type: game.config?.typeText || game.config?.categoryLabel || game.category || 'JILI',
+    GameCategoryId: game.config?.providerGame?.GameCategoryId || game.config?.providerGame?.gameCategoryId || undefined,
+    image: game.image,
+    category: game.category,
+    categoryLabel: game.config?.categoryLabel,
+    Sorting: game.sortOrder,
+    JP: Boolean(game.config?.jp),
+    Freespin: Boolean(game.config?.freeSpin),
+    config: game.config,
+  }));
+}
+
+
 export const launchJiliGame = asyncHandler(async (req, res) => {
   assertUserCanPlay(req.user);
 
@@ -168,8 +444,38 @@ export const launchJiliGame = asyncHandler(async (req, res) => {
 });
 
 export const listJiliGames = asyncHandler(async (_req, res) => {
-  const games = await getJiliGameList();
-  res.json({ success: true, data: games, games });
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+
+  const dbGames = await getJiliGamesFromDatabase();
+
+  if (dbGames.length) {
+    return res.json({
+      success: true,
+      source: 'database',
+      data: dbGames,
+      games: dbGames,
+    });
+  }
+
+  const providerGames = await getJiliGameList();
+  return res.json({
+    success: true,
+    source: 'provider-live-fallback',
+    data: providerGames,
+    games: providerGames,
+  });
+});
+
+export const syncJiliGames = asyncHandler(async (req, res) => {
+  const result = await syncJiliGamesFromProvider({ deactivateStale: req.query.deactivateStale === 'true' });
+
+  res.json({
+    success: true,
+    message: `JILI games synced. Provider: ${result.providerCount}, active unique: ${result.syncedCount}, inserted: ${result.inserted}, updated: ${result.updated}.`,
+    data: result,
+  });
 });
 
 export const authJiliPlayer = asyncHandler(async (req, res) => {
