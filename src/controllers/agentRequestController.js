@@ -10,6 +10,54 @@ import { optionalString } from '../utils/validation.js';
 import { recordAgentCommissionForRequest } from '../services/agentCommissionService.js';
 import { safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
 import { handleSuccessfulDepositForReferral } from '../services/referralRewardService.js';
+import { createUserNotification } from '../services/notificationService.js';
+import { sendDepositSuccessNotificationToUser } from '../services/pushNotificationService.js';
+
+
+function agentSafeCurrency(transaction = {}) {
+  return transaction.currency || transaction.gatewayPayload?.paymentMethod?.currency || transaction.gatewayPayload?.currency || 'BDT';
+}
+
+function agentDepositSuccessMessage(transaction = {}) {
+  const currency = String(agentSafeCurrency(transaction) || 'BDT').toUpperCase();
+  const amount = Number(transaction.amount || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return `Your deposit of ${currency} ${amount} has been credited successfully.`;
+}
+
+async function notifyDepositSuccess(transaction, source = 'agent-deposit-confirm') {
+  if (!transaction?.user) return;
+
+  const userId = transaction.user?._id || transaction.user;
+  const title = 'Deposit Successful';
+  const message = agentDepositSuccessMessage(transaction);
+  const actionUrl = '/wallet';
+
+  await createUserNotification({
+    user: userId,
+    title,
+    message,
+    type: 'deposit',
+    actionUrl,
+    metadata: {
+      transactionId: String(transaction._id || ''),
+      amount: transaction.amount,
+      currency: agentSafeCurrency(transaction),
+      source,
+    },
+  }).catch((error) => {
+    console.error('Deposit success in-site notification failed:', error.message);
+  });
+
+  await sendDepositSuccessNotificationToUser(userId, {
+    amount: transaction.amount,
+    currency: agentSafeCurrency(transaction),
+    transactionId: String(transaction._id || ''),
+    url: actionUrl,
+  }).catch((error) => {
+    console.error('Deposit success push notification failed:', error.message);
+  });
+}
+
 
 function normalizeType(type) {
   const value = String(type || '').toUpperCase();
@@ -103,6 +151,7 @@ export const confirmAgentRequest = asyncHandler(async (req, res) => {
 
     const bonusResult = await safelyAwardFirstDepositBonus(transaction);
     await handleSuccessfulDepositForReferral(transaction).catch((error) => { console.error('Referral reward creation failed:', error.message); });
+    await notifyDepositSuccess(transaction, 'agent-deposit-confirm');
 
     return res.json({
       success: true,

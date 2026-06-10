@@ -17,10 +17,104 @@ import { assertWithdrawMethodMatchesTopDeposit } from '../services/withdrawalPay
 import { getFirstDepositBonusSummary, rejectFirstDepositBonusForUser, safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
 import { getSignupBonusSummary, rejectSignupBonusForUser } from '../services/signupBonusService.js';
 import { handleSuccessfulDepositForReferral } from '../services/referralRewardService.js';
+import { createUserNotification } from '../services/notificationService.js';
+import { sendDepositSuccessNotificationToUser } from '../services/pushNotificationService.js';
 
 function razorpayClient() {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) return null;
   return new Razorpay({ key_id: env.RAZORPAY_KEY_ID, key_secret: env.RAZORPAY_KEY_SECRET });
+}
+
+function normalizeDepositTransactionRef(value = '') {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function escapeRegExp(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function assertUniqueDepositTransactionRef(transactionRef, transactionRefNormalized) {
+  assertOrThrow(transactionRefNormalized, 'Transaction ID / reference number is required', 400);
+
+  const exactRef = String(transactionRef || '').trim();
+  const exactRegex = exactRef ? new RegExp(`^${escapeRegExp(exactRef)}$`, 'i') : null;
+
+  const orFilters = [{ transactionRefNormalized }];
+  if (exactRegex) {
+    orFilters.push({ transactionRef: exactRegex });
+    orFilters.push({ 'gatewayPayload.transactionRef': exactRegex });
+  }
+
+  const duplicateTransaction = await Transaction.findOne({
+    type: 'DEPOSIT',
+    $or: orFilters,
+  }).select('_id status createdAt transactionRef transactionRefNormalized').lean();
+
+  assertOrThrow(
+    !duplicateTransaction,
+    'This transaction ID has already been used. Please check your payment and enter a unique transaction ID.',
+    409,
+    { code: 'DUPLICATE_DEPOSIT_TRANSACTION_ID' }
+  );
+
+  const duplicateRequest = await AgentPaymentRequest.findOne({
+    type: 'DEPOSIT',
+    $or: [
+      { transactionRefNormalized },
+      ...(exactRegex ? [{ transactionRef: exactRegex }] : []),
+    ],
+  }).select('_id status createdAt transactionRef transactionRefNormalized').lean();
+
+  assertOrThrow(
+    !duplicateRequest,
+    'This transaction ID has already been used for a deposit request.',
+    409,
+    { code: 'DUPLICATE_DEPOSIT_TRANSACTION_ID' }
+  );
+}
+
+function depositSuccessMessage(transaction = {}) {
+  const currency = String(transaction.currency || reqSafeCurrency(transaction) || 'BDT').toUpperCase();
+  const amount = Number(transaction.amount || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return `Your deposit of ${currency} ${amount} has been credited successfully.`;
+}
+
+function reqSafeCurrency(transaction = {}) {
+  return transaction.currency || transaction.gatewayPayload?.paymentMethod?.currency || transaction.gatewayPayload?.currency || 'BDT';
+}
+
+async function notifyDepositSuccess(transaction, source = 'deposit-success') {
+  if (!transaction?.user) return;
+
+  const userId = transaction.user?._id || transaction.user;
+  const title = 'Deposit Successful';
+  const message = depositSuccessMessage(transaction);
+  const actionUrl = '/wallet';
+
+  await createUserNotification({
+    user: userId,
+    title,
+    message,
+    type: 'deposit',
+    actionUrl,
+    metadata: {
+      transactionId: String(transaction._id || ''),
+      amount: transaction.amount,
+      currency: reqSafeCurrency(transaction),
+      source,
+    },
+  }).catch((error) => {
+    console.error('Deposit success in-site notification failed:', error.message);
+  });
+
+  await sendDepositSuccessNotificationToUser(userId, {
+    amount: transaction.amount,
+    currency: reqSafeCurrency(transaction),
+    transactionId: String(transaction._id || ''),
+    url: actionUrl,
+  }).catch((error) => {
+    console.error('Deposit success push notification failed:', error.message);
+  });
 }
 
 export const getMyTransactions = asyncHandler(async (req, res) => {
@@ -176,6 +270,7 @@ export const verifyDepositPayment = asyncHandler(async (req, res) => {
   await creditWallet(req.user._id, transaction.amount, 'deposit-success');
   const bonusResult = await safelyAwardFirstDepositBonus(transaction);
     await handleSuccessfulDepositForReferral(transaction).catch((error) => { console.error('Referral reward creation failed:', error.message); });
+  await notifyDepositSuccess(transaction, 'razorpay-deposit');
 
   res.json({ success: true, message: 'Deposit verified', data: transaction, bonus: bonusResult });
 });
@@ -486,7 +581,10 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
   const methodKey = requireString(req.body.methodKey, 'Payment method', 2, 50).toLowerCase();
   const payerNumber = optionalString(req.body.payerNumber, 80) || '';
   const transactionRef = optionalString(req.body.transactionRef, 120) || '';
+  const transactionRefNormalized = normalizeDepositTransactionRef(transactionRef);
   const extraNote = optionalString(req.body.note, 500) || '';
+
+  await assertUniqueDepositTransactionRef(transactionRef, transactionRefNormalized);
 
   const globalMethods = await getGlobalDepositMethods(true);
   const globalMethod = globalMethods.find((item) => item.key === methodKey);
@@ -526,6 +624,8 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
     agentId: agent.agentId,
     methodKey: method.key,
     userNote,
+    transactionRef: transactionRef.trim(),
+    transactionRefNormalized,
     gatewayPayload: {
       paymentMethod: {
         key: method.key,
@@ -558,6 +658,7 @@ export const createAgentDepositRequest = asyncHandler(async (req, res) => {
     userNote,
     payerNumber,
     transactionRef,
+    transactionRefNormalized,
     transaction: transaction._id,
   });
 

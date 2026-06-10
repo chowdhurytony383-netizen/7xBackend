@@ -1,6 +1,10 @@
 import mongoose from 'mongoose';
 import Game from '../models/Game.js';
 import Bet from '../models/Bet.js';
+import CrashBet from '../models/CrashBet.js';
+import ProviderWalletTxn from '../models/ProviderWalletTxn.js';
+import PgsoftTransaction from '../models/PgsoftTransaction.js';
+import JiliTransaction from '../models/JiliTransaction.js';
 import User from '../models/User.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError, assertOrThrow } from '../utils/appError.js';
@@ -14,6 +18,181 @@ async function findGame(slug) {
   if (!game) throw new AppError(`${slug} game is not active`, 404);
   return game;
 }
+
+function asPlainGame(game = {}) {
+  return typeof game.toObject === 'function' ? game.toObject() : game;
+}
+
+function normalizeGameKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function gameIdentityKeys(game = {}) {
+  const raw = asPlainGame(game);
+  const keys = new Set();
+
+  [
+    raw._id,
+    raw.id,
+    raw.name,
+    raw.slug,
+    raw.gameCode,
+    raw.displayName,
+    raw.config?.gameId,
+    raw.config?.providerGame?.GameId,
+    raw.config?.providerGame?.gameId,
+  ].filter(Boolean).forEach((value) => keys.add(normalizeGameKey(value)));
+
+  const provider = String(raw.provider || raw.config?.provider || '').toUpperCase();
+  const gameId = raw.config?.gameId || raw.config?.providerGame?.GameId || raw.config?.providerGame?.gameId;
+
+  if (provider === 'JILI' && gameId) {
+    keys.add(`jili-${normalizeGameKey(gameId)}`);
+    keys.add(`jili${normalizeGameKey(gameId)}`);
+  }
+
+  if (provider === 'PGSOFT' && gameId) {
+    keys.add(`pgsoft-${normalizeGameKey(gameId)}`);
+    keys.add(`pgsoft${normalizeGameKey(gameId)}`);
+  }
+
+  return [...keys].filter(Boolean);
+}
+
+function publicGamePayload(game = {}, extra = {}) {
+  const raw = asPlainGame(game);
+  return {
+    ...raw,
+    playCount: Number(extra.playCount || 0),
+    lastPlayedAt: extra.lastPlayedAt || null,
+  };
+}
+
+function addPopularScore(scoreMap, key, playCount = 1, lastPlayedAt = null) {
+  const normalizedKey = normalizeGameKey(key);
+  if (!normalizedKey) return;
+
+  const current = scoreMap.get(normalizedKey) || { playCount: 0, lastPlayedAt: null };
+  current.playCount += Number(playCount || 0);
+
+  if (lastPlayedAt) {
+    const nextDate = new Date(lastPlayedAt);
+    const currentDate = current.lastPlayedAt ? new Date(current.lastPlayedAt) : null;
+    if (!currentDate || nextDate > currentDate) current.lastPlayedAt = nextDate;
+  }
+
+  scoreMap.set(normalizedKey, current);
+}
+
+async function buildPopularGameScores() {
+  const scoreMap = new Map();
+
+  const [
+    internalBets,
+    jiliBets,
+    pgsoftBets,
+    providerWalletBets,
+    crashBets,
+  ] = await Promise.all([
+    Bet.aggregate([
+      { $match: { status: { $in: ['WIN', 'LOSE', 'CASHED_OUT', 'CANCELLED'] } } },
+      { $group: { _id: '$game', playCount: { $sum: 1 }, lastPlayedAt: { $max: '$createdAt' } } },
+      { $sort: { playCount: -1, lastPlayedAt: -1 } },
+      { $limit: 100 },
+    ]).catch(() => []),
+    JiliTransaction.aggregate([
+      { $match: { status: 'accepted', action: { $in: ['bet', 'sessionBet'] }, game: { $gt: 0 } } },
+      { $group: { _id: '$game', playCount: { $sum: 1 }, lastPlayedAt: { $max: '$createdAt' } } },
+      { $sort: { playCount: -1, lastPlayedAt: -1 } },
+      { $limit: 150 },
+    ]).catch(() => []),
+    PgsoftTransaction.aggregate([
+      { $match: { status: 'success', gameId: { $ne: '' } } },
+      { $group: { _id: '$gameId', playCount: { $sum: 1 }, lastPlayedAt: { $max: '$createdAt' } } },
+      { $sort: { playCount: -1, lastPlayedAt: -1 } },
+      { $limit: 100 },
+    ]).catch(() => []),
+    ProviderWalletTxn.aggregate([
+      { $match: { status: 'success', type: 'debit' } },
+      { $group: { _id: '$slot', playCount: { $sum: 1 }, lastPlayedAt: { $max: '$createdAt' } } },
+      { $sort: { playCount: -1, lastPlayedAt: -1 } },
+      { $limit: 100 },
+    ]).catch(() => []),
+    CrashBet.aggregate([
+      { $match: { status: { $in: ['LOST', 'CASHED_OUT', 'CANCELLED', 'AUTO_CASHED_OUT'] } } },
+      { $group: { _id: 'crash', playCount: { $sum: 1 }, lastPlayedAt: { $max: '$createdAt' } } },
+    ]).catch(() => []),
+  ]);
+
+  for (const item of internalBets) addPopularScore(scoreMap, item._id, item.playCount, item.lastPlayedAt);
+  for (const item of jiliBets) {
+    addPopularScore(scoreMap, `jili-${item._id}`, item.playCount, item.lastPlayedAt);
+    addPopularScore(scoreMap, item._id, item.playCount, item.lastPlayedAt);
+  }
+  for (const item of pgsoftBets) {
+    addPopularScore(scoreMap, `pgsoft-${item._id}`, item.playCount, item.lastPlayedAt);
+    addPopularScore(scoreMap, item._id, item.playCount, item.lastPlayedAt);
+  }
+  for (const item of providerWalletBets) {
+    if (item._id !== null && item._id !== undefined) {
+      addPopularScore(scoreMap, `provider-${item._id}`, item.playCount, item.lastPlayedAt);
+      addPopularScore(scoreMap, item._id, item.playCount, item.lastPlayedAt);
+    }
+  }
+  for (const item of crashBets) addPopularScore(scoreMap, 'crash', item.playCount, item.lastPlayedAt);
+
+  return scoreMap;
+}
+
+function pickPopularScoreForGame(game, scoreMap) {
+  let best = { playCount: 0, lastPlayedAt: null };
+  for (const key of gameIdentityKeys(game)) {
+    const score = scoreMap.get(key);
+    if (!score) continue;
+    if (score.playCount > best.playCount) best = score;
+  }
+  return best;
+}
+
+export const getHomeGameSections = asyncHandler(async (req, res) => {
+  const limit = Math.min(20, Math.max(1, Number(req.query.limit || 20)));
+
+  const [activeGames, newGames, scoreMap] = await Promise.all([
+    Game.find({ isActive: true }).sort({ sortOrder: 1, createdAt: -1 }).limit(800).lean(),
+    Game.find({ isActive: true }).sort({ createdAt: -1, sortOrder: -1 }).limit(limit).lean(),
+    buildPopularGameScores(),
+  ]);
+
+  const popularRanked = activeGames
+    .map((game) => {
+      const score = pickPopularScoreForGame(game, scoreMap);
+      return { game, score };
+    })
+    .filter((item) => item.score.playCount > 0)
+    .sort((a, b) => (
+      (b.score.playCount - a.score.playCount)
+      || (new Date(b.score.lastPlayedAt || 0) - new Date(a.score.lastPlayedAt || 0))
+      || ((a.game.sortOrder || 0) - (b.game.sortOrder || 0))
+    ))
+    .slice(0, limit);
+
+  const fallbackPopular = activeGames
+    .filter((game) => !popularRanked.some((item) => String(item.game._id) === String(game._id)))
+    .slice(0, Math.max(0, limit - popularRanked.length))
+    .map((game) => ({ game, score: { playCount: 0, lastPlayedAt: null } }));
+
+  const popularGames = [...popularRanked, ...fallbackPopular].slice(0, limit);
+
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.json({
+    success: true,
+    data: {
+      newGames: newGames.map((game) => publicGamePayload(game)),
+      popularGames: popularGames.map(({ game, score }) => publicGamePayload(game, score)),
+    },
+  });
+});
+
 
 export const getAllGames = asyncHandler(async (_req, res) => {
   const games = await Game.find({ isActive: true }).sort({ sortOrder: 1, createdAt: 1 });

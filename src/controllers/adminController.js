@@ -19,7 +19,53 @@ import { sanitizeUser } from '../utils/sanitize.js';
 import { safelyAwardFirstDepositBonus } from '../services/firstDepositBonusService.js';
 import { getAdminPresenceSnapshot } from '../services/presenceService.js';
 import { handleSuccessfulDepositForReferral } from '../services/referralRewardService.js';
+import { createUserNotification } from '../services/notificationService.js';
+import { sendDepositSuccessNotificationToUser } from '../services/pushNotificationService.js';
 
+
+function adminSafeCurrency(transaction = {}) {
+  return transaction.currency || transaction.gatewayPayload?.paymentMethod?.currency || transaction.gatewayPayload?.currency || 'BDT';
+}
+
+function adminDepositSuccessMessage(transaction = {}) {
+  const currency = String(adminSafeCurrency(transaction) || 'BDT').toUpperCase();
+  const amount = Number(transaction.amount || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return `Your deposit of ${currency} ${amount} has been credited successfully.`;
+}
+
+async function notifyDepositSuccess(transaction, source = 'admin-deposit-approval') {
+  if (!transaction?.user) return;
+
+  const userId = transaction.user?._id || transaction.user;
+  const title = 'Deposit Successful';
+  const message = adminDepositSuccessMessage(transaction);
+  const actionUrl = '/wallet';
+
+  await createUserNotification({
+    user: userId,
+    title,
+    message,
+    type: 'deposit',
+    actionUrl,
+    metadata: {
+      transactionId: String(transaction._id || ''),
+      amount: transaction.amount,
+      currency: adminSafeCurrency(transaction),
+      source,
+    },
+  }).catch((error) => {
+    console.error('Deposit success in-site notification failed:', error.message);
+  });
+
+  await sendDepositSuccessNotificationToUser(userId, {
+    amount: transaction.amount,
+    currency: adminSafeCurrency(transaction),
+    transactionId: String(transaction._id || ''),
+    url: actionUrl,
+  }).catch((error) => {
+    console.error('Deposit success push notification failed:', error.message);
+  });
+}
 
 
 function asPlain(record) {
@@ -546,6 +592,7 @@ async function updateTransactionStatus(req, res, expectedType) {
     await creditWallet(transaction.user, transaction.amount, 'admin-deposit-approval');
     bonusResult = await safelyAwardFirstDepositBonus(transaction);
     await handleSuccessfulDepositForReferral(transaction).catch((error) => { console.error('Referral reward creation failed:', error.message); });
+    await notifyDepositSuccess(transaction, 'admin-deposit-approval');
   }
 
   if (expectedType === 'WITHDRAW' && ['REJECTED', 'FAILED', 'CANCELLED'].includes(status) && !['REJECTED', 'FAILED', 'CANCELLED'].includes(prevStatus)) {
