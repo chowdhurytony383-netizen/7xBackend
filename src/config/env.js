@@ -202,21 +202,12 @@ export const env = {
   JILI_BASIC_AUTH_USER: process.env.JILI_BASIC_AUTH_USER || '',
   JILI_BASIC_AUTH_PASS: process.env.JILI_BASIC_AUTH_PASS || '',
 
-  // PG SOFT Seamless Wallet integration.
-  PGSOFT_ENABLED: String(process.env.PGSOFT_ENABLED || 'true').toLowerCase() === 'true',
-  PGSOFT_API_DOMAIN: process.env.PGSOFT_API_DOMAIN || '',
-  PGSOFT_OPERATOR_TOKEN: process.env.PGSOFT_OPERATOR_TOKEN || '',
-  PGSOFT_SECRET_KEY: process.env.PGSOFT_SECRET_KEY || '',
-  PGSOFT_ALLOWED_IPS: process.env.PGSOFT_ALLOWED_IPS || '',
-  PGSOFT_SUPPORTED_CURRENCIES: process.env.PGSOFT_SUPPORTED_CURRENCIES || 'BDT,INR,PKR,NPR,LKR,USD',
-  PGSOFT_FALLBACK_CURRENCY: (process.env.PGSOFT_FALLBACK_CURRENCY || 'USD').toUpperCase(),
-  PGSOFT_PLAYER_PREFIX: process.env.PGSOFT_PLAYER_PREFIX || '7xbet_',
-  PGSOFT_SESSION_TTL_MINUTES: Number(process.env.PGSOFT_SESSION_TTL_MINUTES || 60),
-  PGSOFT_DEFAULT_LANGUAGE: process.env.PGSOFT_DEFAULT_LANGUAGE || 'en',
-  PGSOFT_DEFAULT_BET_TYPE: Number(process.env.PGSOFT_DEFAULT_BET_TYPE || 1),
-  PGSOFT_ORIENTATION_CHECK: Number(process.env.PGSOFT_ORIENTATION_CHECK || 1),
-  PGSOFT_GAME_EXIT_URL: process.env.PGSOFT_GAME_EXIT_URL || process.env.FRONTEND_URL || 'https://7xbet.asia',
-  PGSOFT_GAME_LIST: process.env.PGSOFT_GAME_LIST || '',
+  // Firebase web push notifications.
+  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
+  FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL || '',
+  FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY || '',
+  LUCKY_WHEEL_NOTIFICATION_WORKER_ENABLED: String(process.env.LUCKY_WHEEL_NOTIFICATION_WORKER_ENABLED || 'true').toLowerCase() === 'true',
+  LUCKY_WHEEL_NOTIFICATION_CHECK_INTERVAL_MS: Number(process.env.LUCKY_WHEEL_NOTIFICATION_CHECK_INTERVAL_MS || 300000),
 
   // Kept only for old direct_test compatibility. Do not use in production.
   TATUM_BSC_MNEMONIC: process.env.TATUM_BSC_MNEMONIC || '',
