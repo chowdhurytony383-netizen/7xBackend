@@ -56,12 +56,35 @@ function sportsProviderName() {
   );
 }
 
+function sportmonksFootballOverrideEnabled() {
+  const providers = [
+    process.env.SPORTS_FOOTBALL_PROVIDER,
+    process.env.SPORTS_FOOTBALL_ODDS_PROVIDER,
+    process.env.SPORTS_FOOTBALL_SCORE_PROVIDER,
+    process.env.SPORTS_FOOTBALL_DETAILS_PROVIDER,
+  ].map((value) => normalizeProviderName(value || ''));
+
+  return providers.some((provider) => provider === 'sportmonks' || provider === 'sportmonks-football' || provider === 'sportmonks_football')
+    && String(process.env.SPORTMONKS_FOOTBALL_ENABLED || 'false').toLowerCase() === 'true';
+}
+
+function footballEventScopeConditions() {
+  return [
+    { sportKey: /football|soccer/i },
+    { sportTitle: /football|soccer/i },
+    { sport: /football|soccer/i },
+    { league: /football|soccer|premier|laliga|la liga|bundesliga|serie|ligue|uefa|fifa|mls/i },
+  ];
+}
+
 function sportsProviderStorageNames(provider = sportsProviderName()) {
   const normalized = normalizeProviderName(provider);
   if (['sportmonks', 'sportmonks-cricket', 'sportmonks_cricket', 'sportmonks-football', 'sportmonks_football'].includes(normalized)) {
     return ['sportmonks'];
   }
-  return [normalized];
+  const names = [normalized];
+  if (sportmonksFootballOverrideEnabled() && !names.includes('sportmonks')) names.push('sportmonks');
+  return names;
 }
 
 function sportsProviderStorageFilter(provider = sportsProviderName()) {
@@ -306,14 +329,43 @@ function visibleEventCutoff() {
   return new Date(Date.now() - hours * 60 * 60 * 1000);
 }
 
+function providerVisibilityFilter(provider = sportsProviderName()) {
+  if (shouldShowAllSportsProviders()) {
+    if (!sportmonksFootballOverrideEnabled()) return null;
+    return {
+      $or: [
+        // Keep all SportMonks rows visible. Cricket can still use SportMonks while
+        // football is forced to SportMonks Pro.
+        { provider: 'sportmonks' },
+        // Hide only non-SportMonks football/soccer rows so old OpticOdds football
+        // does not duplicate or override the SportMonks Football feed.
+        { provider: { $ne: 'sportmonks' }, $nor: footballEventScopeConditions() },
+      ],
+    };
+  }
+
+  const normalized = normalizeProviderName(provider);
+  if (sportmonksFootballOverrideEnabled() && !['sportmonks', 'sportmonks-cricket', 'sportmonks_cricket', 'sportmonks-football', 'sportmonks_football'].includes(normalized)) {
+    return {
+      $or: [
+        { provider: 'sportmonks', $or: footballEventScopeConditions() },
+        { provider: normalized, $nor: footballEventScopeConditions() },
+      ],
+    };
+  }
+
+  return {
+    ...sportsProviderStorageFilter(provider),
+    ...(sportsProviderEventScopeFilter(provider) || {}),
+  };
+}
+
 function visibleEventFilter(extra = {}) {
-  const providerFilter = shouldShowAllSportsProviders() ? {} : sportsProviderStorageFilter();
-  const providerScopeFilter = shouldShowAllSportsProviders() ? null : sportsProviderEventScopeFilter();
+  const visibility = providerVisibilityFilter();
   const { $or: extraOr, ...restExtra } = extra || {};
 
   const andFilters = [
     {
-      ...providerFilter,
       isActive: true,
       completed: { $ne: true },
       status: { $in: ['LIVE', 'UPCOMING'] },
@@ -330,7 +382,7 @@ function visibleEventFilter(extra = {}) {
     },
   ];
 
-  if (providerScopeFilter) andFilters.push(providerScopeFilter);
+  if (visibility) andFilters.push(visibility);
   if (extraOr) andFilters.push({ $or: extraOr });
 
   return {
@@ -1429,6 +1481,13 @@ export const syncStatus = asyncHandler(async (_req, res) => {
     data: {
       provider,
       storageProviders: shouldShowAllSportsProviders() ? ['all'] : sportsProviderStorageNames(provider),
+      footballProviderOverride: sportmonksFootballOverrideEnabled() ? {
+        provider: process.env.SPORTS_FOOTBALL_PROVIDER || '',
+        oddsProvider: process.env.SPORTS_FOOTBALL_ODDS_PROVIDER || '',
+        scoreProvider: process.env.SPORTS_FOOTBALL_SCORE_PROVIDER || '',
+        detailsProvider: process.env.SPORTS_FOOTBALL_DETAILS_PROVIDER || '',
+        sportmonksConfigured: sportmonksFootballConfigured(),
+      } : null,
       enabled: sportsApiKeyConfigured(),
       detailsProvider: process.env.SPORTS_DETAILS_PROVIDER || 'hybrid',
       detailsEnabled: sportsDetailsConfigured(),
