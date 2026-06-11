@@ -12,14 +12,20 @@ function ttlMs() {
 }
 
 function sportmonksFootballToken() {
-  return process.env.SPORTMONKS_FOOTBALL_API_TOKEN || process.env.SPORTMONKS_API_TOKEN || '';
+  return process.env.SPORTMONKS_FOOTBALL_API_KEY
+    || process.env.SPORTMONKS_FOOTBALL_API_TOKEN
+    || process.env.SPORTMONKS_API_KEY
+    || process.env.SPORTMONKS_API_TOKEN
+    || '';
 }
 
 function detailsEnabled() {
   const provider = String(process.env.SPORTS_DETAILS_PROVIDER || process.env.SPORTS_DETAILS_PROVIDERS || '').toLowerCase();
   const providers = provider.split(',').map((item) => item.trim()).filter(Boolean);
+  const footballProvider = String(process.env.SPORTS_FOOTBALL_DETAILS_PROVIDER || process.env.SPORTS_FOOTBALL_PROVIDER || '').toLowerCase();
+  const footballSportmonksRequested = ['sportmonks', 'sportmonks-football', 'sportmonks_football'].includes(footballProvider);
   return bool(process.env.SPORTS_DETAILS_ENABLED, false)
-    && (provider === 'sportmonks' || provider === 'hybrid' || provider === 'all' || providers.includes('sportmonks'))
+    && (provider === 'sportmonks' || provider === 'hybrid' || provider === 'all' || providers.includes('sportmonks') || footballSportmonksRequested)
     && Boolean(sportmonksFootballToken());
 }
 
@@ -43,7 +49,10 @@ async function fetchSportmonks(path, params = {}) {
 
   try {
     const response = await fetch(makeUrl(path, params), {
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        Authorization: sportmonksFootballToken(),
+      },
       signal: controller.signal,
     });
 

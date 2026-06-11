@@ -905,6 +905,61 @@ function useSportmonksProvider() {
   return provider === 'sportmonks' || provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket' || provider === 'sportmonks-football' || provider === 'sportmonks_football';
 }
 
+function sportmonksFootballOverrideEnabled(kind = 'odds') {
+  const specific = kind === 'scores'
+    ? process.env.SPORTS_FOOTBALL_SCORE_PROVIDER
+    : kind === 'details'
+      ? process.env.SPORTS_FOOTBALL_DETAILS_PROVIDER
+      : process.env.SPORTS_FOOTBALL_ODDS_PROVIDER;
+
+  const providers = [
+    specific,
+    process.env.SPORTS_FOOTBALL_PROVIDER,
+  ].map((value) => normalizeProviderName(value || ''));
+
+  return sportmonksFootballConfigured()
+    && providers.some((provider) => provider === 'sportmonks' || provider === 'sportmonks-football' || provider === 'sportmonks_football');
+}
+
+function combineProviderResults(results = [], mode = 'hybrid_provider_sync') {
+  const stats = {
+    mode,
+    providers: {},
+    events: 0,
+    markets: 0,
+    live: 0,
+    finished: 0,
+    skippedProviders: [],
+    errors: [],
+  };
+
+  results.forEach(({ provider, status, value, reason }) => {
+    if (status === 'rejected') {
+      const message = reason?.message || String(reason || 'sync failed');
+      stats.providers[provider] = { failed: true, message };
+      stats.errors.push({ provider, message, status: reason?.status || null });
+      return;
+    }
+
+    const payload = value || {};
+    stats.providers[provider] = payload;
+    if (payload.skipped) {
+      stats.skippedProviders.push({ provider, message: payload.reason || 'skipped' });
+      return;
+    }
+
+    stats.events += Number(payload.events || payload.updated || payload.checked || 0);
+    stats.markets += Number(payload.markets || 0);
+    stats.live += Number(payload.live || 0);
+    stats.finished += Number(payload.finished || 0);
+    if (Array.isArray(payload.errors)) stats.errors.push(...payload.errors.map((item) => ({ ...item, provider })));
+    if (Array.isArray(payload.skippedSports)) stats.skippedProviders.push(...payload.skippedSports.map((item) => ({ ...item, provider })));
+  });
+
+  stats.status = stats.events ? (stats.errors.length || stats.skippedProviders.length ? 'partial' : 'success') : 'failed';
+  return stats;
+}
+
 function requestedSportmonksSports() {
   const provider = currentSportsProvider();
   if (provider === 'sportmonks-cricket' || provider === 'sportmonks_cricket') return ['cricket'];
@@ -1003,7 +1058,30 @@ export async function syncSportsOdds({ force = false } = {}) {
   if (!force && Date.now() - lastOddsSyncAt < ttl) return { skipped: true, reason: 'recently synced' };
   if (oddsSyncPromise) return oddsSyncPromise;
 
-  oddsSyncPromise = (useSportmonksProvider() ? runSportmonksSync('odds', { force }) : useOpticOddsProvider() ? syncOpticOddsOdds({ force }) : useApiSportsProvider() ? syncApiSportsOdds() : syncTheOddsApiOdds())
+  oddsSyncPromise = (async () => {
+    if (useSportmonksProvider()) return runSportmonksSync('odds', { force });
+
+    const tasks = [];
+    if (useOpticOddsProvider()) tasks.push({ provider: 'opticodds', run: () => syncOpticOddsOdds({ force }) });
+    else if (useApiSportsProvider()) tasks.push({ provider: 'apisports', run: () => syncApiSportsOdds() });
+    else tasks.push({ provider: 'theoddsapi', run: () => syncTheOddsApiOdds() });
+
+    if (sportmonksFootballOverrideEnabled('odds')) {
+      tasks.push({ provider: 'sportmonks-football', run: () => syncSportmonksFootballOdds({ force }) });
+    }
+
+    if (tasks.length === 1) return tasks[0].run();
+
+    const settled = await Promise.all(tasks.map(async (task) => {
+      try {
+        return { provider: task.provider, status: 'fulfilled', value: await task.run() };
+      } catch (error) {
+        return { provider: task.provider, status: 'rejected', reason: error };
+      }
+    }));
+
+    return combineProviderResults(settled, 'hybrid_odds_with_sportmonks_football');
+  })()
     .finally(() => {
       lastOddsSyncAt = Date.now();
       oddsSyncPromise = null;
@@ -1042,7 +1120,7 @@ export async function syncSportsScores({ force = false } = {}) {
       tasks.push({ provider: 'sportmonks-cricket', run: () => syncSportmonksCricketScores({ force }) });
     }
 
-    if (sportmonksFootballConfigured() && bool(process.env.SPORTMONKS_FOOTBALL_ENABLED, false)) {
+    if (sportmonksFootballConfigured() && (bool(process.env.SPORTMONKS_FOOTBALL_ENABLED, false) || sportmonksFootballOverrideEnabled('scores'))) {
       tasks.push({ provider: 'sportmonks-football', run: () => syncSportmonksFootballScores({ force }) });
     }
 

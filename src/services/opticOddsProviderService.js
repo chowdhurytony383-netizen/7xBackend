@@ -1101,13 +1101,44 @@ function configuredSports() {
   return requested.filter(Boolean);
 }
 
+function sportmonksFootballOverrideEnabled() {
+  const providers = [
+    process.env.SPORTS_FOOTBALL_PROVIDER,
+    process.env.SPORTS_FOOTBALL_ODDS_PROVIDER,
+    process.env.SPORTS_FOOTBALL_SCORE_PROVIDER,
+    process.env.SPORTS_FOOTBALL_DETAILS_PROVIDER,
+  ].map((value) => String(value || '').trim().toLowerCase());
+
+  return providers.some((value) => ['sportmonks', 'sportmonks-football', 'sportmonks_football'].includes(value))
+    && String(process.env.SPORTMONKS_FOOTBALL_ENABLED || 'false').toLowerCase() === 'true';
+}
+
+function isFootballSportKey(sport = '') {
+  const clean = String(sport || '').toLowerCase();
+  if (clean.includes('americanfootball') || clean.includes('american_football') || clean.includes('nfl') || clean.includes('ncaaf') || clean.includes('cfl')) return false;
+  return clean.includes('soccer')
+    || clean === 'football'
+    || clean.includes('football')
+    || clean.includes('fifa')
+    || clean.includes('uefa')
+    || clean.includes('epl')
+    || clean.includes('la_liga')
+    || clean.includes('bundesliga')
+    || clean.includes('serie_a')
+    || clean.includes('ligue')
+    || clean.includes('mls');
+}
+
 async function sportsToSync() {
   const requested = configuredSports();
   const shouldDiscover = requested.includes('__discover__') || bool(process.env.OPTICODDS_AUTO_DISCOVER_SPORTS, false);
   const discovered = shouldDiscover ? await discoverOpticSportsFromApi() : [];
   const sports = shouldDiscover && discovered.length ? discovered : (shouldDiscover ? fallbackSports() : requested);
   const unique = [...new Set(sports.map((sport) => String(sport || '').toLowerCase()).filter(Boolean))];
-  return unique.slice(0, maxSportsPerSync());
+  const filtered = sportmonksFootballOverrideEnabled()
+    ? unique.filter((sport) => !isFootballSportKey(sport))
+    : unique;
+  return filtered.slice(0, maxSportsPerSync());
 }
 
 function configuredMarkets() {

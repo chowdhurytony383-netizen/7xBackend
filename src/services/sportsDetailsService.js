@@ -49,6 +49,15 @@ function providerList() {
     providers.unshift('sportmonks');
   }
 
+  // Football can be routed to SportMonks Pro without changing the global provider
+  // used by the rest of the sportsbook.
+  const footballProvider = String(process.env.SPORTS_FOOTBALL_DETAILS_PROVIDER || process.env.SPORTS_FOOTBALL_PROVIDER || '').toLowerCase();
+  const footballSportmonksRequested = ['sportmonks', 'sportmonks-football', 'sportmonks_football'].includes(footballProvider)
+    || (boolEnv('SPORTMONKS_FOOTBALL_ENABLED', false) && sportmonksFootballDetailsConfigured());
+  if (footballSportmonksRequested && !providers.includes('sportmonks')) {
+    providers.unshift('sportmonks');
+  }
+
   return [...new Set(providers)];
 }
 

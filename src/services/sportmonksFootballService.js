@@ -58,9 +58,26 @@ function providerEventIdForFixture(fixture = {}) {
 }
 
 function sportmonksFootballToken() {
-  return process.env.SPORTMONKS_FOOTBALL_API_TOKEN
+  return process.env.SPORTMONKS_FOOTBALL_API_KEY
+    || process.env.SPORTMONKS_FOOTBALL_API_TOKEN
+    || process.env.SPORTMONKS_API_KEY
     || process.env.SPORTMONKS_API_TOKEN
     || '';
+}
+
+function sportmonksFootballOverrideEnabled() {
+  const values = [
+    process.env.SPORTS_FOOTBALL_PROVIDER,
+    process.env.SPORTS_FOOTBALL_ODDS_PROVIDER,
+    process.env.SPORTS_FOOTBALL_SCORE_PROVIDER,
+    process.env.SPORTS_FOOTBALL_DETAILS_PROVIDER,
+  ].map((value) => String(value || '').trim().toLowerCase());
+
+  return values.some((value) => ['sportmonks', 'sportmonks-football', 'sportmonks_football'].includes(value));
+}
+
+function sportmonksFootballTimezone() {
+  return process.env.SPORTMONKS_FOOTBALL_TIMEZONE || process.env.SPORTS_TIMEZONE || '';
 }
 
 export function sportmonksFootballConfigured() {
@@ -82,6 +99,10 @@ function timeoutMs() {
 function makeUrl(path, params = {}) {
   const url = new URL(`${baseUrl()}${path.startsWith('/') ? path : `/${path}`}`);
   url.searchParams.set('api_token', sportmonksFootballToken());
+  const timezone = sportmonksFootballTimezone();
+  if (timezone && !Object.prototype.hasOwnProperty.call(params || {}, 'timezone')) {
+    url.searchParams.set('timezone', timezone);
+  }
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
   });
@@ -614,10 +635,55 @@ async function deactivateStaleSportmonksFootballEvents() {
   };
 }
 
+
+function footballScopeConditions() {
+  return [
+    { sportKey: /football|soccer/i },
+    { sportTitle: /football|soccer/i },
+    { sport: /football|soccer/i },
+    { league: /football|soccer|premier|laliga|la liga|bundesliga|serie|ligue|uefa|fifa|mls/i },
+  ];
+}
+
+async function deactivateOtherFootballProviderEvents() {
+  if (!sportmonksFootballOverrideEnabled()) return { skipped: true, reason: 'football override disabled' };
+
+  const query = {
+    provider: { $ne: 'sportmonks' },
+    isActive: true,
+    $or: footballScopeConditions(),
+  };
+
+  const eventIds = await SportsAutoEvent.distinct('_id', query);
+  if (!eventIds.length) return { deactivatedEvents: 0, closedMarkets: 0 };
+
+  const events = await SportsAutoEvent.updateMany(
+    { _id: { $in: eventIds } },
+    {
+      $set: {
+        isActive: false,
+        lastProviderUpdate: new Date(),
+        'raw.hiddenBySportmonksFootballOverride': true,
+        'raw.hiddenBySportmonksFootballOverrideAt': new Date(),
+      },
+    }
+  );
+
+  const markets = await SportsAutoMarket.updateMany(
+    { event: { $in: eventIds }, status: 'OPEN' },
+    { $set: { status: 'CLOSED', lastProviderUpdate: new Date() } }
+  );
+
+  return {
+    deactivatedEvents: events.modifiedCount || 0,
+    closedMarkets: markets.modifiedCount || 0,
+  };
+}
+
 async function syncSportmonksFootball({ type = 'odds' } = {}) {
   const startedAt = new Date();
   if (!sportmonksFootballConfigured()) {
-    return { skipped: true, reason: 'SPORTMONKS_FOOTBALL_API_TOKEN or SPORTMONKS_API_TOKEN missing, or SPORTMONKS_FOOTBALL_ENABLED=false' };
+    return { skipped: true, reason: 'SPORTMONKS_FOOTBALL_API_KEY/API_TOKEN or SPORTMONKS_API_KEY/API_TOKEN missing, or SPORTMONKS_FOOTBALL_ENABLED=false' };
   }
 
   const stats = {
@@ -649,6 +715,9 @@ async function syncSportmonksFootball({ type = 'odds' } = {}) {
   }
 
   stats.cleanup = await deactivateStaleSportmonksFootballEvents();
+  if (stats.events) {
+    stats.otherProviderCleanup = await deactivateOtherFootballProviderEvents();
+  }
 
   await SportsSyncLog.create({
     type,
