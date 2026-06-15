@@ -33,6 +33,7 @@ import crashGameRoutes from './routes/crashGameRoutes.js';
 import cryptoRoutes from './routes/cryptoRoutes.js';
 import adminCryptoRoutes from './routes/adminCryptoRoutes.js';
 import jiliRoutes from './routes/jiliRoutes.js';
+import pgsoftRoutes from './routes/pgsoftRoutes.js';
 import affiliateRoutes from './routes/affiliateRoutes.js';
 import referralRoutes from './routes/referralRoutes.js';
 import adminAffiliateRoutes from './routes/adminAffiliateRoutes.js';
@@ -103,6 +104,9 @@ app.use(
   express.urlencoded({
     extended: true,
     limit: '1mb',
+    verify: (req, _res, buf) => {
+      req.rawBody = buf.toString('utf8');
+    },
   })
 );
 
@@ -113,6 +117,15 @@ const limiter = rateLimit({
   limit: env.API_RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
+  // PG SOFT wallet callbacks must always return their JSON protocol response with HTTP 200.
+  // They are protected separately by operator credentials, optional HMAC, and callback IP allowlisting.
+  skip: (req) => req.path.startsWith('/pgsoft/verify-session')
+    || req.path.startsWith('/pgsoft/wallet')
+    || req.path.startsWith('/pgsoft/bet-payout')
+    || req.path.startsWith('/pgsoft/adjustment')
+    || req.path.startsWith('/pgsoft/update-bet-details')
+    || req.path.startsWith('/pgsoft/VerifySession')
+    || req.path.startsWith('/pgsoft/Cash/'),
 });
 
 app.use('/api', limiter);
@@ -146,6 +159,29 @@ app.use('/api/crash-native', crashGameRoutes);
 app.use('/api/crypto', cryptoRoutes);
 app.use('/api/source-games', sourceGameRoutes);
 app.use('/api/jili', jiliRoutes);
+app.use('/api/pgsoft', pgsoftRoutes);
+
+// Even parser/CORS middleware errors on provider callbacks must follow PG SOFT's
+// global response contract: JSON with HTTP 200.
+app.use('/api/pgsoft', (error, req, res, next) => {
+  const callbackPath = String(req.path || '').toLowerCase();
+  const isProviderCallback = req.method === 'POST' && (
+    callbackPath === '/verify-session'
+    || callbackPath === '/wallet'
+    || callbackPath === '/bet-payout'
+    || callbackPath === '/adjustment'
+    || callbackPath === '/update-bet-details'
+    || callbackPath === '/verifysession'
+    || callbackPath.startsWith('/cash/')
+  );
+
+  if (!isProviderCallback) return next(error);
+  console.error(`PG SOFT middleware error (${req.originalUrl}):`, error);
+  return res.status(200).type('application/json').json({
+    data: null,
+    error: { code: '1200', message: 'Internal server error.' },
+  });
+});
 
 app.use('/api/agent', agentRoutes);
 app.use('/api/agent', agentPaymentRoutes);
