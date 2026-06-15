@@ -8,6 +8,21 @@ const pgsoftSessionSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    launchTicket: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+    },
+    launchTicketExpiresAt: {
+      type: Date,
+      required: true,
+      index: true,
+    },
+    launchUsedAt: {
+      type: Date,
+      default: null,
+    },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -18,6 +33,13 @@ const pgsoftSessionSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      index: true,
+    },
+    playerNameLower: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
       index: true,
     },
     nickname: {
@@ -59,7 +81,6 @@ const pgsoftSessionSchema = new mongoose.Schema(
     expiresAt: {
       type: Date,
       required: true,
-      index: true,
     },
     lastVerifiedAt: Date,
     lastUsedAt: Date,
@@ -67,7 +88,13 @@ const pgsoftSessionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-pgsoftSessionSchema.index({ playerName: 1, status: 1 });
+pgsoftSessionSchema.pre('validate', function normalizePlayerName(next) {
+  this.playerNameLower = String(this.playerName || '').trim().toLowerCase();
+  next();
+});
+
+pgsoftSessionSchema.index({ playerNameLower: 1, status: 1 });
+pgsoftSessionSchema.index({ user: 1, status: 1, createdAt: -1 });
 pgsoftSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export default mongoose.models.PgsoftSession || mongoose.model('PgsoftSession', pgsoftSessionSchema);

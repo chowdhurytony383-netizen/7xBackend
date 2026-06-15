@@ -9,6 +9,12 @@ const pgsoftTransactionSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    traceId: {
+      type: String,
+      default: '',
+      trim: true,
+      index: true,
+    },
     type: {
       type: String,
       enum: ['BET_PAYOUT', 'ADJUSTMENT'],
@@ -23,6 +29,12 @@ const pgsoftTransactionSchema = new mongoose.Schema(
     playerName: {
       type: String,
       required: true,
+      trim: true,
+      index: true,
+    },
+    operatorPlayerSession: {
+      type: String,
+      default: '',
       trim: true,
       index: true,
     },
@@ -80,6 +92,32 @@ const pgsoftTransactionSchema = new mongoose.Schema(
       default: 0,
       index: true,
     },
+    createTime: {
+      type: Number,
+      default: 0,
+    },
+    betEndTime: {
+      type: Number,
+      default: 0,
+    },
+    transactionType: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    walletType: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    isValidateBet: {
+      type: Boolean,
+      default: false,
+    },
+    isAdjustment: {
+      type: Boolean,
+      default: false,
+    },
     requestPayload: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
@@ -90,9 +128,13 @@ const pgsoftTransactionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['success', 'failed', 'duplicate'],
-      default: 'success',
+      enum: ['processing', 'success', 'failed'],
+      default: 'processing',
       index: true,
+    },
+    attempts: {
+      type: Number,
+      default: 1,
     },
     errorCode: {
       type: String,
